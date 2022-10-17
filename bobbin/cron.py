@@ -33,7 +33,7 @@ from .training import TrainState
 from .evaluation import EvalResults
 from .evaluation import eval_datasets
 
-Action = Callable[[TrainState, ...], Optional[Tuple[TrainState, ...]]]
+Action = Callable[..., Optional[Tuple[TrainState, ...]]]
 
 
 class Trigger(metaclass=abc.ABCMeta):
