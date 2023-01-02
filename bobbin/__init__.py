@@ -47,6 +47,7 @@ from .pytypes import Parameter
 from .pytypes import VarCollection
 
 from .tensorboard import make_eval_results_writer
+from .tensorboard import ScalarSow
 
 from .training import initialize_train_state
 from .training import pmap_for_train_step
