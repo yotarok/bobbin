@@ -66,6 +66,59 @@ class AddressingTest(chex.TestCase):
         chex.assert_trees_all_equal_structs(var, paths)
         chex.assert_trees_all_equal(paths, expected_paths)
 
+    def test_addressing_with_sructured_leaves(self):
+        var = dict(
+            params=_FrozenDict(
+                Layers=(
+                    _FrozenDict(
+                        sow=_Pair(x=1, y=2),
+                        params=_FrozenDict(
+                            weight=np.random.normal(size=(3,)),
+                            bias=np.random.normal(size=(1,)),
+                        ),
+                    ),
+                    _FrozenDict(
+                        sow=_Pair(x=6, y=7),
+                        params=np.random.normal(size=(3,)),
+                    ),
+                )
+            ),
+        )
+        expected_paths = dict(
+            params=_FrozenDict(
+                Layers=(
+                    _FrozenDict(
+                        sow="/params/Layers/0/sow",
+                        params=_FrozenDict(
+                            weight="/params/Layers/0/params/weight",
+                            bias="/params/Layers/0/params/bias",
+                        ),
+                    ),
+                    _FrozenDict(
+                        sow="/params/Layers/1/sow",
+                        params="/params/Layers/1/params",
+                    ),
+                )
+            ),
+        )
+        paths = var_util.nested_vars_to_paths(
+            var, is_leaf=lambda x: isinstance(x, _Pair)
+        )
+        chex.assert_trees_all_equal(paths, expected_paths)
+
+    def test_flatten_with_paths_with_structured_leaves(self):
+        var = dict(
+            elem1=_Pair(x=1, y=2),
+            elem2=_Pair(x=3, y=4),
+        )
+        leaves_with_paths = var_util.flatten_with_paths(
+            var, is_leaf=lambda x: isinstance(x, _Pair)
+        )
+        chex.assert_equal(
+            [("/elem1", _Pair(x=1, y=2)), ("/elem2", _Pair(x=3, y=4))],
+            list(leaves_with_paths),
+        )
+
 
 if __name__ == "__main__":
     absltest.main()

@@ -14,7 +14,7 @@
 
 """Utility functions for handling variable collections."""
 
-from typing import Any, Dict, Iterator, Tuple
+from typing import Any, Callable, Dict, Iterator, Optional, Tuple
 
 import chex
 import flax
@@ -25,6 +25,8 @@ _Array = chex.Array
 _ArrayTree = chex.ArrayTree
 _PRNGKey = chex.PRNGKey
 _Scalar = chex.Scalar
+
+_IsLeafFn = Callable[[Any], bool]
 
 
 def _nested_structs_to_dicts(v: _ArrayTree) -> Dict[Any, Any]:
@@ -52,8 +54,18 @@ def _nested_dicts_to_paths(
         return prefix
 
 
-def nested_vars_to_paths(node: _ArrayTree, *, pathsep: str = "/") -> _ArrayTree:
+def nested_vars_to_paths(
+    node: _ArrayTree, *, pathsep: str = "/", is_leaf: Optional[_IsLeafFn] = None
+) -> _ArrayTree:
     """Constructs a tree with the same structure but containing path names as leaves."""
+    if is_leaf is not None:
+        # Fill placeholder in the places of deemed leaves for mimicking
+        # `_nested_structs_to_dict` (that uses `flax.serialization.to_state_dict`)
+        placeholder = -1
+        node = jax.tree_map(
+            lambda x: placeholder if is_leaf(x) else x, node, is_leaf=is_leaf
+        )
+
     node_dict = _nested_structs_to_dicts(node)
     paths_dicts = _nested_dicts_to_paths(node_dict, pathsep=pathsep)
     paths, unused_treedef = jax.tree_util.tree_flatten(paths_dicts)
@@ -61,11 +73,13 @@ def nested_vars_to_paths(node: _ArrayTree, *, pathsep: str = "/") -> _ArrayTree:
     return jax.tree_util.tree_unflatten(treedef, paths)
 
 
-def flatten_with_paths(node: _ArrayTree) -> Iterator[Tuple[str, _Array]]:
+def flatten_with_paths(
+    node: _ArrayTree, *, is_leaf: Optional[_IsLeafFn] = None
+) -> Iterator[Tuple[str, _Array]]:
     """Returns an iterator for leaves in the tree and their paths."""
-    paths = nested_vars_to_paths(node)
+    paths = nested_vars_to_paths(node, is_leaf=is_leaf)
     paths, unused_treedef = jax.tree_util.tree_flatten(paths)
-    leaves, unused_treedef = jax.tree_util.tree_flatten(node)
+    leaves, unused_treedef = jax.tree_util.tree_flatten(node, is_leaf=is_leaf)
     for path, leaf in zip(paths, leaves):
         yield path, leaf
 
