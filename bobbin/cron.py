@@ -25,6 +25,7 @@ from typing import Any, Callable, Dict, List, Optional, Tuple
 
 from flax import struct
 from flax.training import checkpoints
+import jax
 import jax.numpy as jnp
 import numpy as np
 
@@ -158,14 +159,14 @@ class _ArrayEncoder(json.JSONEncoder):
     """Internal JSON encoder that supports array encoding."""
 
     def default(self, obj: Any):
-        if isinstance(obj, np.ndarray) or isinstance(obj, jnp.DeviceArray):
+        if isinstance(obj, (np.ndarray, jnp.DeviceArray, jax.Array)):
             if obj.shape == ():
                 # Scalar is serialized as normal scalar
                 return obj.tolist()
             return dict(
                 __array__=True,
                 dtype=obj.dtype.name,
-                data=obj.to_list(),
+                data=obj.tolist(),
             )
         return super().default(obj)
 

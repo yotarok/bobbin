@@ -40,6 +40,9 @@ def noisy_linear(
 
 
 _N_CPU_DEVICES = 4
+chex.set_n_cpu_devices(
+    _N_CPU_DEVICES
+)  # Just for making sure it is done before any jax ops
 
 
 def setUpModule():
