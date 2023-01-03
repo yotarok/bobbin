@@ -51,6 +51,26 @@ class TrainSowPublisherTest(chex.TestCase):
         writer.scalar.assert_any_call("sow/layers/0/mean_output", 1.23, step=123)
         writer.scalar.assert_any_call("sow/layers/0/var_output", 2.46, step=123)
 
+    def test_image(self):
+        image = np.random.uniform(size=(13, 13, 3))
+        tb_vars = dict(x=tensorboard.ImageSow(image=image))
+        writer = mock.create_autospec(flax_tb.SummaryWriter)
+        tensorboard.publish_train_intermediates(writer, tb_vars, 123)
+        writer.image.assert_any_call("sow/x", image, step=123)
+
+    def test_mpl_image(self):
+        data = np.random.uniform(size=(17, 11))
+        h_paddings = (np.arange(11) >= 7).astype(np.float32)
+        v_paddings = (np.arange(17) >= 11).astype(np.float32)
+        tb_vars = dict(
+            x=tensorboard.MplImageSow(
+                image=data, h_paddings=h_paddings, v_paddings=v_paddings
+            )
+        )
+        writer = mock.create_autospec(flax_tb.SummaryWriter)
+        tensorboard.publish_train_intermediates(writer, tb_vars, 123)
+        writer.image.assert_any_call("sow/x", mock.ANY, step=123)
+
 
 @flax.struct.dataclass
 class EvalResults:
