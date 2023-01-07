@@ -27,7 +27,7 @@ pip uninstall -y bobbin || true
 
 ## code health check
 black --check bobbin examples tests
-flake8 --max-line-length=88 bobbin examples tests
+flake8 --ignore=E203,W503 --max-line-length=88 bobbin examples tests
 
 ## type checking
 pytype bobbin tests
