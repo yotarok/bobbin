@@ -23,6 +23,9 @@ from typing import Callable, Dict, Optional, Set
 import chex
 from flax import struct
 from flax.metrics import tensorboard as flax_tb
+import matplotlib
+import matplotlib.pyplot as plt
+import numpy as np
 
 from .evaluation import EvalResults
 from .training import TrainState
@@ -47,6 +50,58 @@ class ScalarSow(PublishableSow):
 
     def publish(self, writer: flax_tb.SummaryWriter, tag: str, step: int) -> None:
         writer.scalar(tag, self.value, step=step)
+
+
+@struct.dataclass
+class ImageSow(PublishableSow):
+    image: chex.Array
+
+    def publish(self, writer: flax_tb.SummaryWriter, tag: str, step: int) -> None:
+        writer.image(tag, self.image, step=step)
+
+
+@struct.dataclass
+class MplImageSow(PublishableSow):
+    image: chex.Array
+    h_paddings: Optional[chex.Array] = None
+    v_paddings: Optional[chex.Array] = None
+    cmap: Optional[str] = struct.field(pytree_node=False, default=None)
+    interpolation: Optional[str] = struct.field(pytree_node=False, default=None)
+    aspect: Optional[str] = struct.field(pytree_node=False, default=None)
+    origin: Optional[str] = struct.field(pytree_node=False, default=None)
+    with_colorbar: bool = struct.field(pytree_node=False, default=False)
+
+    @property
+    def trimmed_image(self):
+        ret = self.image
+        if self.v_paddings is not None:
+            ret = np.delete(
+                ret, [i for i, pad in enumerate(self.v_paddings) if pad > 0.5], axis=0
+            )
+        if self.h_paddings is not None:
+            ret = np.delete(
+                ret, [i for i, pad in enumerate(self.h_paddings) if pad > 0.5], axis=1
+            )
+        return ret
+
+    def publish(self, writer: flax_tb.SummaryWriter, tag: str, step: int) -> None:
+        matplotlib.use("agg")
+        fig = plt.figure()
+        ax = fig.add_subplot()
+        im = ax.imshow(
+            self.trimmed_image,
+            cmap=self.cmap,
+            aspect=self.aspect,
+            interpolation=self.interpolation,
+            origin=self.origin,
+        )
+        if self.with_colorbar:
+            fig.colorbar(im)
+        fig.canvas.draw()
+
+        imagedata = np.array(fig.canvas.renderer._renderer)
+        imagedata = imagedata[::, ::, :3]  # delete alpha
+        writer.image(tag, imagedata, step=step)
 
 
 def publish_train_intermediates(
