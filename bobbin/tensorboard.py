@@ -100,6 +100,7 @@ class MplImageSow(PublishableSow):
         fig.canvas.draw()
 
         imagedata = np.array(fig.canvas.renderer._renderer)
+        plt.close(fig)
         imagedata = imagedata[::, ::, :3]  # delete alpha
         writer.image(tag, imagedata, step=step)
 
