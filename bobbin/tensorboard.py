@@ -18,10 +18,10 @@ from __future__ import annotations
 import abc
 import os
 import pathlib
-import re
-from typing import Callable, Dict, Iterator, Optional, Set, Tuple, Union
+from typing import Callable, Dict, Optional, Set
 
 import chex
+from flax import struct
 from flax.metrics import tensorboard as flax_tb
 
 from .evaluation import EvalResults
@@ -31,35 +31,22 @@ from .var_util import flatten_with_paths
 _ArrayTree = chex.ArrayTree
 
 
-class VarSelector(metaclass=abc.ABCMeta):
-    """Abstract base class for variable selectors."""
-
+class PublishableSow(metaclass=abc.ABCMeta):
     @abc.abstractmethod
-    def enumerate(self, tree: _ArrayTree) -> Iterator[Tuple[str, chex.Array]]:
+    def publish(writer: flax_tb.SummaryWriter, tag: str, step: int) -> None:
         ...
 
 
-class PathRexpVarSelector(VarSelector):
-    """Variable selector that finds tree-leaves based on regex over path names."""
-
-    def __init__(self, path_rexp: Union[str, re.Pattern]):
-        # `compile` does nothing if arg is already compiled.
-        self.path_rexp = re.compile(path_rexp)
-
-    def enumerate(self, tree: _ArrayTree) -> Iterator[Tuple[str, chex.Array]]:
-        rexp = re.compile(self.path_rexp)
-        for path, var in flatten_with_paths(tree):
-            if rexp.match(path):
-                yield path, var
+def _is_publishable_sow(node: _ArrayTree) -> bool:
+    return isinstance(node, PublishableSow)
 
 
-def _make_rexp_sub(pattern: Union[str, re.Pattern], repl: str):
-    pattern = re.compile(pattern)
+@struct.dataclass
+class ScalarSow(PublishableSow):
+    value: chex.Array
 
-    def sub(s: str) -> str:
-        return re.sub(pattern, repl, s)
-
-    return sub
+    def publish(self, writer: flax_tb.SummaryWriter, tag: str, step: int) -> None:
+        writer.scalar(tag, self.value, step=step)
 
 
 def publish_train_intermediates(
@@ -67,8 +54,7 @@ def publish_train_intermediates(
     tree: _ArrayTree,
     step: int,
     *,
-    scalar_selector: VarSelector = PathRexpVarSelector(".*:scalar(/0)?"),
-    scalar_tag_rewriter: Callable[[str], str] = _make_rexp_sub(":scalar(/0)?$", ""),
+    prefix: str = "sow/",
 ) -> None:
     """Writes variables specified in the args to SummaryWriter `writer`.
 
@@ -85,9 +71,10 @@ def publish_train_intermediates(
             name used in TensorBoard. By default, tag names are defined as a
             name of last path component without ":scalar" suffix.
     """
-    for varname, val in scalar_selector.enumerate(tree):
-        tag = scalar_tag_rewriter(varname)
-        writer.scalar(tag, val, step=step)
+    for path, val in flatten_with_paths(tree, is_leaf=_is_publishable_sow):
+        if not _is_publishable_sow(val):
+            continue
+        val.publish(writer, prefix + path[1:], step=step)
 
 
 _EvalResultsWriteFn = Callable[[EvalResults, TrainState, flax_tb.SummaryWriter], None]

@@ -92,8 +92,8 @@ class CNNDenseClassifier(nn.Module):
 
         cnn_mean = jnp.mean(x)
         cnn_var = jnp.var(x)
-        self.sow("intermediates", "cnn_mean:scalar", cnn_mean)
-        self.sow("intermediates", "cnn_var:scalar", cnn_var)
+        self.sow("tensorboard", "cnn_mean", bobbin.ScalarSow(cnn_mean))
+        self.sow("tensorboard", "cnn_var", bobbin.ScalarSow(cnn_var))
 
         if self.normalize_cnn_out:
             x = nn.BatchNorm(use_running_average=is_eval)(x)
@@ -107,7 +107,7 @@ class CNNDenseClassifier(nn.Module):
 
         logit_entropy = -jnp.sum(jax.nn.softmax(x) * jax.nn.log_softmax(x), axis=-1)
         logit_entropy = jnp.mean(logit_entropy)
-        self.sow("intermediates", "logit_entropy:scalar", logit_entropy)
+        self.sow("tensorboard", "logit_entropy", bobbin.ScalarSow(logit_entropy))
         return x
 
 
@@ -315,7 +315,7 @@ def main(args: argparse.Namespace):
         "publish_tb",
         _ForEachNSteps(100),
         lambda s, **_: bobbin.tensorboard.publish_train_intermediates(
-            train_writer, s.extra_vars["intermediates"], s.step
+            train_writer, s.extra_vars["tensorboard"], s.step
         ),
     )
 
@@ -323,6 +323,7 @@ def main(args: argparse.Namespace):
         train_state, step_info = train_step_fn(train_state, batch, next(prng_keys))
         train_state_0 = flax.jax_utils.unreplicate(train_state)
         crontab.run(train_state_0, step_info=step_info)
+        del train_state.extra_vars["tensorboard"]
 
 
 if __name__ == "__main__":

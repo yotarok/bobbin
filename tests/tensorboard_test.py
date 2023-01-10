@@ -26,25 +26,30 @@ import optax
 from bobbin import tensorboard
 
 
-class TrainIntermediatesPublisherTest(chex.TestCase):
+class TrainSowPublisherTest(chex.TestCase):
     def test_default(self):
         variables = {
             "params": {
                 "layers": (
                     {
                         "weight": np.random.normal(size=(3, 3)),
-                        "not_for_tb:scalar": 3.14,
                     },
                 ),
             },
-            "intermediates": {
-                "layers": ({"mean_output:scalar": 1.23, "var_output:scalar": 2.46},)
+            "tensorboard": {
+                "layers": (
+                    {
+                        "mean_output": tensorboard.ScalarSow(1.23),
+                        "var_output": tensorboard.ScalarSow(2.46),
+                    },
+                )
             },
         }
         writer = mock.create_autospec(flax_tb.SummaryWriter)
-        tensorboard.publish_train_intermediates(writer, variables["intermediates"], 123)
-        writer.scalar.assert_any_call("/layers/0/mean_output", 1.23, step=123)
-        writer.scalar.assert_any_call("/layers/0/var_output", 2.46, step=123)
+        tensorboard.publish_train_intermediates(writer, variables["tensorboard"], 123)
+        print(writer.scalar.call_args_list)
+        writer.scalar.assert_any_call("sow/layers/0/mean_output", 1.23, step=123)
+        writer.scalar.assert_any_call("sow/layers/0/var_output", 2.46, step=123)
 
 
 @flax.struct.dataclass
