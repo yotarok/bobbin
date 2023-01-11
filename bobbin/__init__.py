@@ -22,6 +22,7 @@ from .cron import AtNthStep
 from .cron import CronTab
 from .cron import ForEachNSteps
 from .cron import ForEachTSeconds
+from .cron import PublishTrainingProgress
 from .cron import RunEval
 from .cron import RunEvalKeepBest
 from .cron import SaveCheckpoint

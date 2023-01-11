@@ -107,6 +107,9 @@ class EvalTask:
         """Evaluate single batch and returns `EvalResults`."""
         raise NotImplementedError()
 
+    def finalize_eval_results(self, metrics: EvalResults) -> EvalResults:
+        return metrics
+
 
 def eval_batches(
     eval_task: EvalTask, batches: Iterable[Batch], *args, **kwargs
@@ -135,6 +138,7 @@ def eval_batches(
                 f" `eval_task.create_eval_results ({type(metrics)})."
             )
         metrics = metrics.reduce(new_result)
+    metrics = eval_task.finalize_eval_results(metrics)
     return metrics
 
 
