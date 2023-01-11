@@ -21,14 +21,16 @@ import json
 import os
 import pathlib
 import time
-from typing import Any, Callable, Dict, List, Optional, Tuple
+from typing import Any, Callable, Dict, List, Optional, Sequence, Tuple
 
 from flax import struct
+from flax.metrics import tensorboard as flax_tb
 from flax.training import checkpoints
 import jax
 import jax.numpy as jnp
 import numpy as np
 
+from .tensorboard import publish_train_intermediates
 from .training import StepInfo
 from .training import TrainState
 from .evaluation import EvalResults
@@ -247,7 +249,39 @@ class WriteLog:
         self, train_state: TrainState, *, step_info: StepInfo, **unused_kwargs
     ):
         print(f"Step={train_state.step}, loss={step_info.loss}")
-        print(train_state.extra_vars)
+
+
+class PublishTrainingProgress:
+    """Action that publishes training SoWs and training throughput."""
+
+    def __init__(
+        self,
+        writer: flax_tb.SummaryWriter,
+        summary_collections: Sequence[str] = ("tensorboard",),
+    ):
+        self.writer = writer
+        self.summary_collections = summary_collections
+        self.last_fired_time = None
+        self.last_fired_step = None
+
+    def __call__(self, train_state: TrainState, **unused_kwargs):
+        cur_time = time.time()
+        if self.last_fired_time is not None and self.last_fired_step is not None:
+            wall_time = cur_time - self.last_fired_time
+            nsteps = train_state.step - self.last_fired_step
+            steps_per_sec = nsteps / wall_time
+            self.writer.scalar(
+                "trainer/steps_per_sec", steps_per_sec, step=train_state.step
+            )
+
+        for colname in self.summary_collections:
+            if colname not in train_state.extra_vars:
+                continue
+            publish_train_intermediates(
+                self.writer, train_state.extra_vars[colname], train_state.step
+            )
+        self.last_fired_time = cur_time
+        self.last_fired_step = train_state.step
 
 
 class CronTab:

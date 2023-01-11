@@ -26,6 +26,7 @@ import numpy as np
 import optax
 
 from bobbin import cron
+from bobbin import training
 
 _FrozenDict = flax.core.FrozenDict
 
@@ -110,6 +111,25 @@ class TriggerTest(chex.TestCase):
         for step in range(30):
             state = state.replace(step=step)
             self.assertEqual(trigger.check(state), step <= 5 or step % 3 == 0)
+
+
+class TrainingProgressPublisherTest(chex.TestCase):
+    @unittest.mock.patch("time.time")
+    def test_speed_metrics(self, time_mock):
+        state = training.TrainState.create(
+            apply_fn=None, params=None, tx=optax.identity(), extra_vars=dict()
+        )
+        writer = unittest.mock.MagicMock()
+        action = cron.PublishTrainingProgress(writer)
+
+        state = state.replace(step=10)
+        time_mock.return_value = 1000.0
+        action(state)
+
+        state = state.replace(step=133)
+        time_mock.return_value = 1010.0
+        action(state)
+        writer.scalar.assert_called_with("trainer/steps_per_sec", 12.3, step=133)
 
 
 if __name__ == "__main__":

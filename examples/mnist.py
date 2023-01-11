@@ -50,6 +50,7 @@ _AtNthStep = bobbin.AtNthStep
 _ForEachNSteps = bobbin.ForEachNSteps
 _ForEachTSeconds = bobbin.ForEachTSeconds
 _RunEval = bobbin.RunEval
+_PublishTrainingProgress = bobbin.PublishTrainingProgress
 _SaveCheckpoint = bobbin.SaveCheckpoint
 _WriteLog = bobbin.WriteLog
 
@@ -312,11 +313,7 @@ def main(args: argparse.Namespace):
         _WriteLog(),
     )
     crontab.add(
-        "publish_tb",
-        _ForEachNSteps(100),
-        lambda s, **_: bobbin.tensorboard.publish_train_intermediates(
-            train_writer, s.extra_vars["tensorboard"], s.step
-        ),
+        "publish_tb", _ForEachNSteps(100), _PublishTrainingProgress(train_writer)
     )
 
     for batch in train_ds.as_numpy_iterator():
