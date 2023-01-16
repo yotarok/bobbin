@@ -21,7 +21,7 @@ import json
 import os
 import pathlib
 import time
-from typing import Any, Callable, Dict, List, Optional, Sequence, Tuple
+from typing import Any, Callable, Optional, Sequence, Tuple, Union
 
 from flax import struct
 from flax.metrics import tensorboard as flax_tb
@@ -36,6 +36,8 @@ from .training import TrainState
 from .evaluation import EvalResults
 from .evaluation import eval_datasets
 
+# For making type aliases "Tuple" is still needed as the code-execution
+# semantics will not be altered by "__future__.annotations".
 Action = Callable[..., Optional[Tuple[TrainState, ...]]]
 
 
@@ -45,11 +47,17 @@ class Trigger(metaclass=abc.ABCMeta):
     def __or__(self, other: Trigger) -> OrTrigger:
         return OrTrigger(self, other)
 
+    @abc.abstractmethod
+    def check(self, train_state: TrainState) -> bool:
+        ...
+
 
 class OrTrigger(Trigger):
     """Combined trigger representing "A or B"."""
 
-    def __init__(self, *triggers: List[Trigger]):
+    _triggers: Sequence[Trigger]
+
+    def __init__(self, *triggers):
         super().__init__()
         self._triggers = triggers
 
@@ -144,13 +152,13 @@ class RunEval:
         return RunEvalKeepBest(self, tune_on, dest_path)
 
     def add_result_processor(
-        self, f: Callable[[Dict[str, EvalResults], TrainState], Any]
+        self, f: Callable[[dict[str, EvalResults], TrainState], Any]
     ):
         self._result_processors.append(f)
         return self
 
 
-def _json_object_hook_for_arrays(d: Dict[str, Any]) -> Any:
+def _json_object_hook_for_arrays(d: dict[str, Any]) -> Any:
     if "__array__" in d and d["__array__"]:
         dtype = np.dtype(d.get("dtype", "float32"))
         return np.array(d["data"], dtype=dtype)
@@ -190,7 +198,7 @@ def _try_deserialize_eval_results(
 class RunEvalKeepBestResult:
     """Data class for return values of `RunEvalKeepBest` action."""
 
-    eval_results: Dict[str, EvalResults]
+    eval_results: dict[str, EvalResults]
     current_best: Optional[EvalResults]
     saved_train_state: Optional[TrainState]
 
@@ -198,7 +206,9 @@ class RunEvalKeepBestResult:
 class RunEvalKeepBest:
     """Action that runs evaluation and saves the best checkpoint."""
 
-    def __init__(self, run_eval_action: Action, tune_on: str, dest_path: os.PathLike):
+    def __init__(
+        self, run_eval_action: Action, tune_on: str, dest_path: Union[str, os.PathLike]
+    ):
         self._run_eval_action = run_eval_action
         self._tune_on = tune_on
         self._dest_path = dest_path
@@ -294,7 +304,7 @@ class CronTab:
         self._actions.append((name, trigger, action))
         return self
 
-    def run(self, train_state: TrainState, *args, **kwargs) -> Dict[str, Any]:
+    def run(self, train_state: TrainState, *args, **kwargs) -> dict[str, Any]:
         results = dict()
         for name, trig, act in self._actions:
             if trig.check(train_state):
