@@ -18,9 +18,10 @@ from __future__ import annotations
 import abc
 import os
 import pathlib
-from typing import Callable, Dict, Optional, Set
+from typing import Callable, Dict, Optional, Union
 
 import chex
+import flax
 from flax import struct
 from flax.metrics import tensorboard as flax_tb
 import matplotlib
@@ -28,10 +29,10 @@ import matplotlib.pyplot as plt
 import numpy as np
 
 from .evaluation import EvalResults
-from .training import TrainState
 from .var_util import flatten_with_paths
 
 _ArrayTree = chex.ArrayTree
+_TrainState = flax.training.train_state.TrainState
 
 
 class PublishableSow(metaclass=abc.ABCMeta):
@@ -133,14 +134,14 @@ def publish_train_intermediates(
         val.publish(writer, prefix + path[1:], step=step)
 
 
-_EvalResultsWriteFn = Callable[[EvalResults, TrainState, flax_tb.SummaryWriter], None]
+_EvalResultsWriteFn = Callable[[EvalResults, _TrainState, flax_tb.SummaryWriter], None]
 
 
 def make_eval_results_writer(
-    summary_root_dir: os.PathLike[str],
-    dataset_filter: Optional[Set[str]] = None,
+    summary_root_dir: Union[str, os.PathLike[str]],
+    dataset_filter: Optional[set[str]] = None,
     method: Optional[_EvalResultsWriteFn] = None,
-):
+) -> Callable[[dict[str, EvalResults], _TrainState], None]:
     """Makes a function that publishes evaluation results from different datasets.
 
     Args:
@@ -158,7 +159,7 @@ def make_eval_results_writer(
     summary_root_dir = pathlib.Path(summary_root_dir)
     writers = dict()
 
-    def _tb_writer(res: Dict[str, EvalResults], st: TrainState):
+    def _tb_writer(res: Dict[str, EvalResults], st: _TrainState):
         for name, result in res.items():
             if dataset_filter is not None and name not in dataset_filter:
                 continue

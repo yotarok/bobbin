@@ -22,9 +22,10 @@ import flax
 import jax
 import numpy as np
 
-from bobbin import Batch
-from bobbin import EvalResults
+import bobbin
 from bobbin import evaluation
+
+Batch = bobbin.Batch
 
 
 @flax.struct.dataclass
@@ -74,7 +75,7 @@ class SumEvalTask(evaluation.EvalTask):
     def create_eval_results(self):
         return SimpleTreeResults(value=0.0)
 
-    def evaluate(self, batch: Batch) -> EvalResults:
+    def evaluate(self, batch: Batch) -> SimpleTreeResults:
         return SimpleTreeResults(
             value=jax.tree_util.tree_reduce(lambda acc, x: acc + x.sum(), batch, 0.0)
         )
@@ -91,6 +92,7 @@ class EvalTaskTest(chex.TestCase):
             np.ones(batch_shape) * 0.4,
         ]
         results = evaluation.eval_batches(eval_task, batches)
+        assert isinstance(results, SimpleTreeResults)
         np.testing.assert_allclose(results.value, 1.0 * np.prod(batch_shape))
 
     def test_type_check(self):

@@ -23,6 +23,7 @@ import pathlib
 import time
 from typing import Any, Callable, Optional, Sequence, Tuple, Union
 
+import flax
 from flax import struct
 from flax.metrics import tensorboard as flax_tb
 from flax.training import checkpoints
@@ -31,14 +32,16 @@ import jax.numpy as jnp
 import numpy as np
 
 from .tensorboard import publish_train_intermediates
+from .training import TrainState as BobbinTrainState
 from .training import StepInfo
-from .training import TrainState
 from .evaluation import EvalResults
 from .evaluation import eval_datasets
 
+_TrainState = flax.training.train_state.TrainState
+
 # For making type aliases "Tuple" is still needed as the code-execution
 # semantics will not be altered by "__future__.annotations".
-Action = Callable[..., Optional[Tuple[TrainState, ...]]]
+Action = Callable[..., Optional[Tuple[_TrainState, ...]]]
 
 
 class Trigger(metaclass=abc.ABCMeta):
@@ -48,7 +51,7 @@ class Trigger(metaclass=abc.ABCMeta):
         return OrTrigger(self, other)
 
     @abc.abstractmethod
-    def check(self, train_state: TrainState) -> bool:
+    def check(self, train_state: _TrainState) -> bool:
         ...
 
 
@@ -61,7 +64,7 @@ class OrTrigger(Trigger):
         super().__init__()
         self._triggers = triggers
 
-    def check(self, train_state: TrainState) -> bool:
+    def check(self, train_state: _TrainState) -> bool:
         return any(trig.check(train_state) for trig in self._triggers)
 
     def __or__(self, other: Trigger) -> OrTrigger:
@@ -78,7 +81,7 @@ class ForEachNSteps(Trigger):
         super().__init__()
         self._n = n
 
-    def check(self, train_state: TrainState) -> bool:
+    def check(self, train_state: _TrainState) -> bool:
         return train_state.step % self._n == 0
 
 
@@ -90,7 +93,7 @@ class ForEachTSeconds(Trigger):
         self._period_secs = secs
         self._last_fired = -secs if fire_at_zero else time.time()
 
-    def check(self, train_state: TrainState) -> bool:
+    def check(self, train_state: _TrainState) -> bool:
         cur = time.time()
         fire = cur - self._last_fired > self._period_secs
         if fire:
@@ -107,7 +110,7 @@ class AtFirstNSteps(Trigger):
         self._process_first_step = None
         self._n = n
 
-    def check(self, train_state: TrainState) -> bool:
+    def check(self, train_state: _TrainState) -> bool:
         if self._process_wise:
             if self._process_first_step is None:
                 self._process_first_step = train_state.step
@@ -123,7 +126,7 @@ class AtNthStep(Trigger):
         super().__init__()
         self._n = n
 
-    def check(self, train_state: TrainState) -> bool:
+    def check(self, train_state: _TrainState) -> bool:
         return train_state.step == self._n
 
 
@@ -135,7 +138,9 @@ class RunEval:
         self._eval_batch_gens = eval_batch_gens
         self._result_processors = []
 
-    def __call__(self, train_state: TrainState, **unused_kwargs):
+    def __call__(self, train_state: _TrainState, **unused_kwargs):
+        if not isinstance(train_state, BobbinTrainState):
+            raise ValueError("`RunEval` action must be used with `bobbin.TrainState`")
         eval_results = eval_datasets(
             self._eval_task, self._eval_batch_gens, train_state.model_vars
         )
@@ -152,7 +157,7 @@ class RunEval:
         return RunEvalKeepBest(self, tune_on, dest_path)
 
     def add_result_processor(
-        self, f: Callable[[dict[str, EvalResults], TrainState], Any]
+        self, f: Callable[[dict[str, EvalResults], _TrainState], Any]
     ):
         self._result_processors.append(f)
         return self
@@ -200,7 +205,7 @@ class RunEvalKeepBestResult:
 
     eval_results: dict[str, EvalResults]
     current_best: Optional[EvalResults]
-    saved_train_state: Optional[TrainState]
+    saved_train_state: Optional[_TrainState]
 
 
 class RunEvalKeepBest:
@@ -248,7 +253,7 @@ class SaveCheckpoint:
     def __init__(self, dest_path: str):
         self._dest_path = dest_path
 
-    def __call__(self, train_state: TrainState, **unused_kwargs):
+    def __call__(self, train_state: _TrainState, **unused_kwargs):
         checkpoints.save_checkpoint(self._dest_path, train_state, train_state.step)
 
 
@@ -256,7 +261,7 @@ class WriteLog:
     """Action that outputs logs regarding training state."""
 
     def __call__(
-        self, train_state: TrainState, *, step_info: StepInfo, **unused_kwargs
+        self, train_state: _TrainState, *, step_info: StepInfo, **unused_kwargs
     ):
         print(f"Step={train_state.step}, loss={step_info.loss}")
 
@@ -274,7 +279,11 @@ class PublishTrainingProgress:
         self.last_fired_time = None
         self.last_fired_step = None
 
-    def __call__(self, train_state: TrainState, **unused_kwargs):
+    def __call__(self, train_state: _TrainState, **unused_kwargs):
+        if not isinstance(train_state, BobbinTrainState):
+            raise ValueError(
+                "`PublishTrainingProgress` action must be used with `bobbin.TrainState`"
+            )
         cur_time = time.time()
         if self.last_fired_time is not None and self.last_fired_step is not None:
             wall_time = cur_time - self.last_fired_time
@@ -304,7 +313,7 @@ class CronTab:
         self._actions.append((name, trigger, action))
         return self
 
-    def run(self, train_state: TrainState, *args, **kwargs) -> dict[str, Any]:
+    def run(self, train_state: _TrainState, *args, **kwargs) -> dict[str, Any]:
         results = dict()
         for name, trig, act in self._actions:
             if trig.check(train_state):
