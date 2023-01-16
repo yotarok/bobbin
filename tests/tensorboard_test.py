@@ -23,6 +23,7 @@ from flax.metrics import tensorboard as flax_tb
 import numpy as np
 import optax
 
+import bobbin
 from bobbin import tensorboard
 
 
@@ -73,7 +74,7 @@ class TrainSowPublisherTest(chex.TestCase):
 
 
 @flax.struct.dataclass
-class EvalResults:
+class EvalResults(bobbin.evaluation.EvalResults):
     input_norm_counts: np.ndarray
     input_norm_bins: np.ndarray
     accuracy: float
@@ -124,7 +125,7 @@ class EvalResultsPublisherTest(chex.TestCase):
     def test_eval_results_writer_with_filtering(self):
         state = _create_empty_state(step=123)
         writer_fn = tensorboard.make_eval_results_writer(
-            "/dummy/root_dir", ["devset", "trainset"]
+            "/dummy/root_dir", set(["devset", "trainset"])
         )
         EvalResults.write_to_tensorboard = mock.MagicMock()
         writer_fn(
