@@ -15,15 +15,14 @@
 """Module for typing.
 """
 
-from typing import Callable, Dict, Iterable, Union
+from typing import Any, Callable, Dict, Iterable, Union
 
 import chex
-import jaxlib
 
 # Type-aliases for writing self-documenting code.
 Batch = chex.ArrayTree
-Backend = Union[str, jaxlib.xla_extension.Client, None]
-Device = jaxlib.xla_extension.Device
+Backend = Union[str, None]
+Device = Any
 Parameter = chex.ArrayTree
 BatchGen = Callable[[], Iterable[Batch]]
 VarCollection = Dict[str, chex.ArrayTree]
