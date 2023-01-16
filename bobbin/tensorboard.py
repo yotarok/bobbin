@@ -36,7 +36,7 @@ _ArrayTree = chex.ArrayTree
 
 class PublishableSow(metaclass=abc.ABCMeta):
     @abc.abstractmethod
-    def publish(writer: flax_tb.SummaryWriter, tag: str, step: int) -> None:
+    def publish(self, writer: flax_tb.SummaryWriter, tag: str, step: int) -> None:
         ...
 
 
