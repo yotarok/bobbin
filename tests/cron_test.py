@@ -14,42 +14,17 @@
 
 """Tests for cron."""
 
-import json
 import unittest
 
 from absl.testing import absltest
-from absl.testing import parameterized
 import chex
 import flax
-import jax.numpy as jnp
-import numpy as np
 import optax
 
 from bobbin import cron
 from bobbin import training
 
 _FrozenDict = flax.core.FrozenDict
-
-
-class JsonEncoderTest(chex.TestCase):
-    @parameterized.named_parameters(
-        ("np_array", lambda x: np.asarray(x)), ("jnp_array", lambda x: jnp.asarray(x))
-    )
-    def test_array_serialization(self, asarray_fn):
-        # This test currently involves private features direcltly, and it
-        # should be avoided once we found a reasonable boundary between private/
-        # public APIs.'
-        x = asarray_fn(np.random.uniform(size=(3, 5)))
-        y = asarray_fn(np.random.uniform(size=(7,)))
-        z = asarray_fn(np.random.uniform(size=()))
-
-        # Note that tuples will be transformed to lists by serializer.
-        data = [dict(x=x, y=y), z]
-        json_data = json.dumps(data, cls=cron._ArrayEncoder)
-        reconstructed = json.loads(
-            json_data, object_hook=cron._json_object_hook_for_arrays
-        )
-        chex.assert_trees_all_equal(data, reconstructed)
 
 
 class TriggerTest(chex.TestCase):

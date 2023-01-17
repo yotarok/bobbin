@@ -14,11 +14,14 @@
 
 """Tests for var_util."""
 
+import json
+import tempfile
 from typing import Any, Optional
 
 from absl.testing import absltest
 import chex
 import flax
+import jax
 import numpy as np
 
 from bobbin import var_util
@@ -117,6 +120,48 @@ class AddressingTest(chex.TestCase):
         chex.assert_equal(
             [("/elem1", _Pair(x=1, y=2)), ("/elem2", _Pair(x=3, y=4))],
             list(leaves_with_paths),
+        )
+
+
+class JsonTest(chex.TestCase):
+    def test_serialize_and_deserialize_in_mem(self):
+        var = dict(
+            elem1=_Pair(x=np.array([1, 2]), y=np.array([3, 4])),
+            elem2=_Pair(x=5, y=None),
+        )
+
+        json_str = var_util.dump_pytree_json(var)
+        reconstructed_dict = json.loads(json_str)
+        chex.assert_equal(
+            reconstructed_dict,
+            dict(
+                elem1=dict(
+                    x={"__array__": True, "data": [1, 2], "dtype": "int64"},
+                    y={"__array__": True, "data": [3, 4], "dtype": "int64"},
+                ),
+                elem2=dict(x=5, y=None),
+            ),
+        )
+
+        zeroed_var = jax.tree_map(lambda x: 0, var)
+        reconstructed_var = var_util.parse_pytree_json(json_str, zeroed_var)
+        jax.tree_util.tree_map(
+            lambda x, y: np.testing.assert_allclose(x, y), var, reconstructed_var
+        )
+
+    def test_serialize_and_deserialize_in_fs(self):
+        var = dict(
+            elem1=_Pair(x=np.array([1, 2]), y=np.array([3, 4])),
+            elem2=_Pair(x=5, y=None),
+        )
+
+        tmpf = tempfile.NamedTemporaryFile()
+        var_util.write_pytree_json_file(tmpf.name, var)
+        zeroed_var = jax.tree_map(lambda x: 0, var)
+        reconstructed_var = var_util.read_pytree_json_file(tmpf.name, zeroed_var)
+
+        jax.tree_util.tree_map(
+            lambda x, y: np.testing.assert_allclose(x, y), var, reconstructed_var
         )
 
 

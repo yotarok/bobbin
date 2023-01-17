@@ -62,10 +62,10 @@ class EvalResultsTest(chex.TestCase):
 
     def test_state_dict(self):
         results = SimpleTreeResults.test_sample_1()
-        serializable = results.to_state_dict()
+        serializable = flax.serialization.to_state_dict(results)
         # clear data, maintaining the tree structure.
         loaded = jax.tree_util.tree_map(lambda x: x * 0, results)
-        loaded = loaded.load_state_dict(serializable)
+        loaded = flax.serialization.from_state_dict(loaded, serializable)
         jax.tree_util.tree_map(
             lambda x, y: np.testing.assert_allclose(x, y), results, loaded
         )

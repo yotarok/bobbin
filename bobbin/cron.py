@@ -17,7 +17,6 @@
 from __future__ import annotations
 
 import abc
-import json
 import os
 import pathlib
 import time
@@ -27,15 +26,14 @@ import flax
 from flax import struct
 from flax.metrics import tensorboard as flax_tb
 from flax.training import checkpoints
-import jax
-import jax.numpy as jnp
-import numpy as np
 
 from .tensorboard import publish_train_intermediates
 from .training import TrainState as BobbinTrainState
 from .training import StepInfo
 from .evaluation import EvalResults
 from .evaluation import eval_datasets
+from .var_util import read_pytree_json_file
+from .var_util import write_pytree_json_file
 
 _TrainState = flax.training.train_state.TrainState
 
@@ -163,37 +161,11 @@ class RunEval:
         return self
 
 
-def _json_object_hook_for_arrays(d: dict[str, Any]) -> Any:
-    if "__array__" in d and d["__array__"]:
-        dtype = np.dtype(d.get("dtype", "float32"))
-        return np.array(d["data"], dtype=dtype)
-    return d
-
-
-class _ArrayEncoder(json.JSONEncoder):
-    """Internal JSON encoder that supports array encoding."""
-
-    def default(self, obj: Any):
-        if isinstance(obj, (np.ndarray, jnp.DeviceArray, jax.Array)):
-            if obj.shape == ():
-                # Scalar is serialized as normal scalar
-                return obj.tolist()
-            return dict(
-                __array__=True,
-                dtype=obj.dtype.name,
-                data=obj.tolist(),
-            )
-        return super().default(obj)
-
-
 def _try_deserialize_eval_results(
     path: os.PathLike, template: EvalResults
 ) -> Optional[EvalResults]:
     try:
-        result_json = pathlib.Path(path).read_text()
-        state_dict = json.loads(result_json, object_hook=_json_object_hook_for_arrays)
-        ret = template.load_state_dict(state_dict)
-        return ret
+        return read_pytree_json_file(path, template)
     except FileNotFoundError:
         pass
     return None
@@ -237,8 +209,7 @@ class RunEvalKeepBest:
             checkpoints.save_checkpoint(
                 self._dest_path, train_state, train_state.step, overwrite=True
             )
-            results_json = json.dumps(result.to_state_dict(), cls=_ArrayEncoder)
-            pathlib.Path(self._results_path).write_text(results_json)
+            write_pytree_json_file(self._results_path, result)
             saved_train_state = train_state
         return RunEvalKeepBestResult(
             eval_results=eval_results,

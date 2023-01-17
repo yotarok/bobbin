@@ -14,11 +14,16 @@
 
 """Utility functions for handling variable collections."""
 
-from typing import Any, Callable, Dict, Iterator, Optional, Tuple
+import os
+import pathlib
+import json
+from typing import Any, Callable, Dict, Iterator, Optional, Tuple, Union
 
 import chex
 import flax
 import jax
+import jax.numpy as jnp
+import numpy as np
 
 
 _Array = chex.Array
@@ -89,3 +94,50 @@ def prng_keygen(seed: _PRNGKey) -> Iterator[_PRNGKey]:
     while True:
         rng, seed = jax.random.split(seed)
         yield rng
+
+
+def _json_object_hook_for_arrays(d: Dict[str, Any]) -> Any:
+    if "__array__" in d and d["__array__"]:
+        dtype = np.dtype(d.get("dtype", "float32"))
+        return np.array(d["data"], dtype=dtype)
+    return d
+
+
+class _ArrayEncoder(json.JSONEncoder):
+    """Internal JSON encoder that supports array encoding."""
+
+    def default(self, obj: Any):
+        if isinstance(obj, (np.ndarray, jnp.DeviceArray, jax.Array)):
+            if obj.shape == ():
+                # Scalar is serialized as normal scalar
+                return obj.tolist()
+            return dict(
+                __array__=True,
+                dtype=obj.dtype.name,
+                data=obj.tolist(),
+            )
+        return super().default(obj)
+
+
+def dump_pytree_json(
+    tree: chex.ArrayTree,
+) -> str:
+    return json.dumps(flax.serialization.to_state_dict(tree), cls=_ArrayEncoder)
+
+
+def write_pytree_json_file(path: Union[str, os.PathLike], tree: chex.ArrayTree) -> None:
+    pathlib.Path(path).write_text(dump_pytree_json(tree))
+
+
+def parse_pytree_json(
+    json_str: Union[bytes, str], template: chex.ArrayTree
+) -> chex.ArrayTree:
+    state_dict = json.loads(json_str, object_hook=_json_object_hook_for_arrays)
+    return flax.serialization.from_state_dict(template, state_dict)
+
+
+def read_pytree_json_file(
+    path: Union[str, os.PathLike], template: chex.ArrayTree
+) -> Optional[chex.ArrayTree]:
+    json = pathlib.Path(path).read_text()
+    return parse_pytree_json(json, template)
