@@ -17,9 +17,8 @@
 
 from __future__ import annotations
 
-from typing import Any, Dict, Iterable
+from typing import Dict, Iterable
 
-import flax
 from flax import struct
 from flax.metrics import tensorboard as flax_tb
 
@@ -86,14 +85,6 @@ class EvalResults:
             " However, `EvalResults.write_to_tensorboard` is not overridden"
             f" in the subclass ({type(self)})"
         )
-
-    def load_state_dict(self, d: Any) -> EvalResults:
-        """Load values from the dictionary representation of this `EvalResults`."""
-        return flax.serialization.from_state_dict(self, d)
-
-    def to_state_dict(self) -> Dict[Any, Any]:
-        """Convert to a dictionary representation of this `EvalResults`."""
-        return flax.serialization.to_state_dict(self)
 
 
 class EvalTask:
