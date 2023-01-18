@@ -25,7 +25,7 @@
             echo "ALREADY_CREATED"
           fi
           SSH_CMD=$(gcloud compute tpus tpu-vm ssh {{ vars.node_name }} --zone {{ vars.zone }} --project {{ vars.project }} --dry-run)
-          SSH_OPTS=$(echo "${SSH_CMD}" | sed 's/^[^ ]* //' | sed 's/ [^ ]*$//')
+          SSH_OPTS=$(echo "${SSH_CMD}" | sed 's/^[^ ]* //' | sed 's/ [^ ]*$//' | sed 's/-t //')
           TARGET=$(echo "${SSH_CMD}" | sed 's/^.* \([^ ]*\)$/\1/')
           USER=$(echo "${TARGET}" | cut -d'@' -f 1)
           HOST=$(echo "${TARGET}" | cut -d'@' -f 2)
@@ -67,7 +67,8 @@
           - "--exclude=.*"
           - "--exclude=*.pyc"
           - "--exclude=__*"
-          - "--exclude=log.archived"
+          - "--exclude=build"
+          - "--exclude=*.egg-info"
       # noqa args  # `use_ssh_args` is relatively new and ansible-lint may not support.
     - name: Install bobbin prerequiments
       ansible.builtin.pip:
