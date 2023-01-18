@@ -1,4 +1,5 @@
 flax>=0.6.0
 jax>=0.3.16
+matplotlib
 numpy>=1.18.0
 tensorflow
