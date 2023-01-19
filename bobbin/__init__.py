@@ -57,6 +57,11 @@ from .training import pmap_for_train_step
 from .training import TrainTask
 from .training import TrainState
 
+from .var_util import dump_pytree_json
+from .var_util import parse_pytree_json
 from .var_util import prng_keygen
+from .var_util import read_pytree_json_file
+from .var_util import write_pytree_json_file
+
 
 __version__ = "0.0.1"
