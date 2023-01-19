@@ -66,7 +66,7 @@
         rsync_opts:
           - "--exclude=.*"
           - "--exclude=*.pyc"
-          - "--exclude=__*"
+          - "--exclude=__pycache*"
           - "--exclude=build"
           - "--exclude=*.egg-info"
       # noqa args  # `use_ssh_args` is relatively new and ansible-lint may not support.
@@ -84,6 +84,7 @@
         name:
           - "tensorboard"
           - "tensorflow-io"
+          - "tensorflow_datasets"
       become: true
     - name: Give final notes
       ansible.builtin.debug:
