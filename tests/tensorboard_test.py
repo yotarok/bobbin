@@ -89,9 +89,13 @@ class EvalResults(bobbin.evaluation.EvalResults):
         )
 
 
+_SummaryWriterOriginal = flax_tb.SummaryWriter
+
+
 def _create_mock_writer(dest_path, **kwargs):
-    ret = mock.create_autospec(flax_tb.SummaryWriter)
+    ret = mock.create_autospec(_SummaryWriterOriginal)
     ret.dest_path = dest_path
+    print(ret)
     return ret
 
 

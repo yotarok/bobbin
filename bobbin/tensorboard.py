@@ -169,5 +169,6 @@ def make_eval_results_writer(
                 result.write_to_tensorboard(st, writers[name])
             else:
                 method(result, st, writers[name])
+            writers[name].flush()
 
     return _tb_writer
