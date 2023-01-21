@@ -38,6 +38,7 @@ import bobbin
 
 _Array = chex.Array
 _Batch = bobbin.Batch
+_DenyList = flax.core.scope.DenyList
 _Parameter = bobbin.Parameter
 _PRNGKey = chex.PRNGKey
 _Scalar = chex.Scalar
@@ -266,29 +267,35 @@ def make_model() -> nn.Module:
 def main(args: argparse.Namespace):
     prng_keys = bobbin.prng_keygen(jax.random.PRNGKey(0))
     train_ds, eval_dss = get_datasets()
-    all_checkpoint_path = args.checkpoint_path / "all_ckpts"
-    best_checkpoint_path = args.checkpoint_path / "best_ckpts"
-    tensorboard_path = args.checkpoint_path / "tensorboard"
+    all_checkpoint_path = args.log_dir_path / "all_ckpts"
+    best_checkpoint_path = args.log_dir_path / "best_ckpts"
+    tensorboard_path = args.log_dir_path / "tensorboard"
 
     init_inputs = np.zeros(shape=(1, 28, 28, 1), dtype=np.float32)
+    init_rngs = {
+        "dropout": next(prng_keys),
+        "params": next(prng_keys),
+    }
     model = make_model()
-    init_model_vars = jax.jit(model.init)(
-        {
-            "dropout": next(prng_keys),
-            "params": next(prng_keys),
-        },
-        init_inputs,
-    )
+    print(model.tabulate(init_rngs, init_inputs, mutable=_DenyList(["tensorboard"])))
+    init_model_vars = jax.jit(model.init)(init_rngs, init_inputs)
+
     task = ClassificationTask(model)
     evaler = EvalTask(model)
     train_state = bobbin.initialize_train_state(
         model.apply, init_model_vars, make_tx(), checkpoint_path=all_checkpoint_path
     )
+    init_train_state = train_state
     train_state = flax.jax_utils.replicate(train_state, jax.local_devices())
     eval_batch_gens = {dsname: ds.as_numpy_iterator for dsname, ds in eval_dss.items()}
     train_step_fn = bobbin.pmap_for_train_step(jax.jit(task.make_training_step_fn()))
 
     train_writer = flax_tb.SummaryWriter(tensorboard_path / "train")
+    train_writer.text(
+        "trainer/log/total_num_params",
+        f"Number of parameters: {bobbin.total_dimensionality(init_train_state.params)}",
+        step=init_train_state.step,
+    )
     eval_writers = bobbin.make_eval_results_writer(tensorboard_path)
     warmup = 5
     crontab = bobbin.CronTab()
@@ -325,6 +332,6 @@ def main(args: argparse.Namespace):
 
 if __name__ == "__main__":
     argparser = argparse.ArgumentParser(description="MNIST training")
-    argparser.add_argument("--checkpoint_path", type=pathlib.Path, default=None)
+    argparser.add_argument("--log_dir_path", type=pathlib.Path, default=None)
     args = argparser.parse_args()
     main(args)
