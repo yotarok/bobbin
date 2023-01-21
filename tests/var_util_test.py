@@ -165,5 +165,14 @@ class JsonTest(chex.TestCase):
         )
 
 
+class VarInspectorTest(chex.TestCase):
+    def check_total_dimensionality(self):
+        var = dict(
+            elem1=_Pair(x=np.array([1, 2]), y=np.array([3, 4])),
+            elem2=_Pair(x=5, y=None),
+        )
+        np.testing.assert_equal(var_util.total_dimensionality(var), 5)
+
+
 if __name__ == "__main__":
     absltest.main()

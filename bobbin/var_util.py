@@ -141,3 +141,10 @@ def read_pytree_json_file(
 ) -> Optional[chex.ArrayTree]:
     json = pathlib.Path(path).read_text()
     return parse_pytree_json(json, template)
+
+
+def total_dimensionality(tree: chex.ArrayTree) -> int:
+    """Returns total dimensionality of the variables in the given tree."""
+    return jax.tree_util.tree_reduce(
+        lambda n, arr: n + np.product(np.asarray(arr).shape), tree, 0
+    )
