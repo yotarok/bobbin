@@ -275,56 +275,33 @@ class CtcAsrTask(bobbin.TrainTask):
         )
 
 
-@struct.dataclass
-class SequenceError:
-    refs: int = 0
-    subs: int = 0
-    dels: int = 0
-    inss: int = 0
+def _error_to_log_message(error: asrio.SequenceError) -> str:
+    return (
+        f"S={error.subs}, D={error.dels}, I={error.inss}, "
+        f"ER={error.error_rate * 100.0}%"
+    )
 
-    @property
-    def error_rate(self) -> float:
-        return (self.subs + self.dels + self.inss) / self.refs
 
-    @property
-    def hyps(self) -> int:
-        return self.refs + self.inss - self.dels
-
-    def to_log_message(self) -> str:
-        return (
-            f"S={self.subs}, D={self.dels}, I={self.inss}, "
-            f"ER={self.error_rate * 100.0}%"
-        )
-
-    def write_to_tensorboard(
-        self,
-        writer: flax_tb.SummaryWriter,
-        token_type: str,
-        step: int,
-        prefix: str = "",
-    ) -> None:
-        writer.scalar(prefix + f"{token_type}_subs", self.subs, step=step)
-        writer.scalar(prefix + f"{token_type}_dels", self.dels, step=step)
-        writer.scalar(prefix + f"{token_type}_inss", self.inss, step=step)
-        writer.scalar(prefix + f"{token_type}_refs", self.refs, step=step)
-        writer.scalar(prefix + f"{token_type}_hyps", self.hyps, step=step)
-        writer.scalar(prefix + f"{token_type}_error_rate", self.error_rate, step=step)
-
-    def accumulate(self, hyp: Sequence[Any], ref: Sequence[Any]) -> SequenceError:
-        s, d, i = asrio.compute_edit_distance(hyp, ref)
-        return SequenceError(
-            refs=self.refs + len(ref),
-            subs=self.subs + s,
-            dels=self.dels + d,
-            inss=self.inss + i,
-        )
+def _write_error_to_tensorboard(
+    error: asrio.SequenceError,
+    writer: flax_tb.SummaryWriter,
+    token_type: str,
+    step: int,
+    prefix: str = "",
+) -> None:
+    writer.scalar(prefix + f"error_rate_{token_type}", error.error_rate, step=step)
+    writer.scalar(prefix + f"num_subs_{token_type}", error.subs, step=step)
+    writer.scalar(prefix + f"num_dels_{token_type}", error.dels, step=step)
+    writer.scalar(prefix + f"num_inss_{token_type}", error.inss, step=step)
+    writer.scalar(prefix + f"num_refs_{token_type}", error.refs, step=step)
+    writer.scalar(prefix + f"num_hyps_{token_type}", error.hyps, step=step)
 
 
 @struct.dataclass
 class EvalResults(bobbin.EvalResults):
-    token_error: SequenceError = struct.field(default_factory=SequenceError)
-    word_error: SequenceError = struct.field(default_factory=SequenceError)
-    char_error: SequenceError = struct.field(default_factory=SequenceError)
+    token_error: asrio.SequenceError = struct.field(default_factory=asrio.SequenceError)
+    word_error: asrio.SequenceError = struct.field(default_factory=asrio.SequenceError)
+    char_error: asrio.SequenceError = struct.field(default_factory=asrio.SequenceError)
     num_sentences: int = 0
     num_sentence_errors: int = 0
     start_time: Optional[float] = None
@@ -366,11 +343,11 @@ class EvalResults(bobbin.EvalResults):
             sample_summary += f" REF: {ref}\n" f" HYP: {hyp}\n"
         return (
             "Token: "
-            + self.token_error.to_log_message()
+            + _error_to_log_message(self.token_error)
             + "\n Char: "
-            + self.char_error.to_log_message()
+            + _error_to_log_message(self.char_error)
             + "\n Word: "
-            + self.word_error.to_log_message()
+            + _error_to_log_message(self.word_error)
             + f"\nSent.: ER= {self.sentence_error_rate * 100}%"
             + f" ({self.sentences_per_second} sentences/sec)\n"
             + sample_summary
@@ -423,9 +400,9 @@ class EvalResults(bobbin.EvalResults):
         self, current_train_state: _TrainState, writer: flax_tb.SummaryWriter
     ) -> None:
         step = current_train_state.step
-        self.token_error.write_to_tensorboard(writer, "token", step, "eval/")
-        self.char_error.write_to_tensorboard(writer, "char", step, "eval/")
-        self.word_error.write_to_tensorboard(writer, "word", step, "eval/")
+        _write_error_to_tensorboard(self.token_error, writer, "token", step, "eval/")
+        _write_error_to_tensorboard(self.char_error, writer, "char", step, "eval/")
+        _write_error_to_tensorboard(self.word_error, writer, "word", step, "eval/")
         writer.scalar("eval/sent_error_rate", self.sentence_error_rate, step=step)
         writer.scalar("eval/sent_refs", self.num_sentences, step=step)
         if self.sentences_per_second is not None:
