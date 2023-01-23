@@ -341,6 +341,34 @@ def compute_edit_distance(
 
 
 @struct.dataclass
+class SequenceError:
+    """Dataclass containing edit-distance information."""
+
+    refs: int = 0
+    subs: int = 0
+    dels: int = 0
+    inss: int = 0
+
+    @property
+    def error_rate(self) -> float:
+        return (self.subs + self.dels + self.inss) / self.refs
+
+    @property
+    def hyps(self) -> int:
+        return self.refs + self.inss - self.dels
+
+    def accumulate(self, hyp: Sequence[Any], ref: Sequence[Any]) -> SequenceError:
+        """Increments error counts by computing errors from given hypothesis."""
+        s, d, i = compute_edit_distance(hyp, ref)
+        return type(self)(
+            refs=self.refs + len(ref),
+            subs=self.subs + s,
+            dels=self.dels + d,
+            inss=self.inss + i,
+        )
+
+
+@struct.dataclass
 class MeanVarNormalizer:
     """A dataclass containing mean and variance (stddev) of input features.
 
