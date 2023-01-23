@@ -19,7 +19,9 @@ from __future__ import annotations
 
 import argparse
 import functools
+import logging
 import pathlib
+import sys
 from typing import Dict, Sequence, Tuple
 
 import chex
@@ -277,7 +279,6 @@ def main(args: argparse.Namespace):
         "params": next(prng_keys),
     }
     model = make_model()
-    print(model.tabulate(init_rngs, init_inputs, mutable=_DenyList(["tensorboard"])))
     init_model_vars = jax.jit(model.init)(init_rngs, init_inputs)
 
     task = ClassificationTask(model)
@@ -323,6 +324,7 @@ def main(args: argparse.Namespace):
         "publish_tb", _ForEachNSteps(100), _PublishTrainingProgress(train_writer)
     )
 
+    logging.info("Main loop started.")
     for batch in train_ds.as_numpy_iterator():
         train_state, step_info = train_step_fn(train_state, batch, next(prng_keys))
         train_state_0 = flax.jax_utils.unreplicate(train_state)
@@ -331,6 +333,12 @@ def main(args: argparse.Namespace):
 
 
 if __name__ == "__main__":
+    logging.basicConfig(stream=sys.stderr)
+    logging.root.setLevel(logging.INFO)
+
+    # Disable TF's memory preallocation if TF is built with CUDA.
+    tf.config.experimental.set_visible_devices([], "GPU")
+
     argparser = argparse.ArgumentParser(description="MNIST training")
     argparser.add_argument("--log_dir_path", type=pathlib.Path, default=None)
     args = argparser.parse_args()

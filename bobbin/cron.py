@@ -17,10 +17,11 @@
 from __future__ import annotations
 
 import abc
+import logging
 import os
 import pathlib
 import time
-from typing import Any, Callable, Optional, Sequence, Tuple, Union
+from typing import Any, Callable, Dict, Optional, Sequence, Tuple, Union
 
 import flax
 from flax import struct
@@ -139,12 +140,17 @@ class RunEval:
     def __call__(self, train_state: _TrainState, **unused_kwargs):
         if not isinstance(train_state, BobbinTrainState):
             raise ValueError("`RunEval` action must be used with `bobbin.TrainState`")
+
         eval_results = eval_datasets(
             self._eval_task, self._eval_batch_gens, train_state.model_vars
         )
         for dsname, results in eval_results.items():
-            print(f"Step={train_state.step}, Dataset={dsname}")
-            print(results.to_log_message())
+            logging.info(
+                "Evaluation results for dataset=%s @step=%d\n%s",
+                dsname,
+                train_state.step,
+                results.to_log_message(),
+            )
 
         for proc in self._result_processors:
             proc(eval_results, train_state)
@@ -231,10 +237,21 @@ class SaveCheckpoint:
 class WriteLog:
     """Action that outputs logs regarding training state."""
 
+    def __init__(
+        self, *, level: int = logging.INFO, logger: Optional[logging.Logger] = None
+    ):
+        self.logger = logging.root if logger is None else logger
+        self.level = level
+
     def __call__(
         self, train_state: _TrainState, *, step_info: StepInfo, **unused_kwargs
     ):
-        print(f"Step={train_state.step}, loss={step_info.loss}")
+        self.logger.log(
+            self.level,
+            "Training state @step=%d loss=%s",
+            int(train_state.step),
+            str(step_info.loss),
+        )
 
 
 class PublishTrainingProgress:
@@ -284,7 +301,7 @@ class CronTab:
         self._actions.append((name, trigger, action))
         return self
 
-    def run(self, train_state: _TrainState, *args, **kwargs) -> dict[str, Any]:
+    def run(self, train_state: _TrainState, *args, **kwargs) -> Dict[str, Any]:
         results = dict()
         for name, trig, act in self._actions:
             if trig.check(train_state):

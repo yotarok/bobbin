@@ -19,8 +19,10 @@
 from __future__ import annotations
 
 import argparse
+import logging
+import sys
 import time
-from typing import Optional
+from typing import Dict, Optional, Tuple
 
 import bobbin
 import jax
@@ -51,11 +53,12 @@ def prepare_datasets(
 
 
 def compute_normalizer(dataset, feature_fn):
-    def prepare(row):
+    def prepare(row: Dict[str, tf.Tensor]) -> Tuple[tf.Tensor, tf.Tensor]:
         return row["speech"], tf.zeros_like(row["speech"], tf.float32)
 
-    def tf_feature_fn(*row):
-        waveform, waveform_paddings = row
+    def tf_feature_fn(
+        waveform: tf.Tensor, waveform_paddings: tf.Tensor
+    ) -> Tuple[tf.Tensor, tf.Tensor]:
         return tf.numpy_function(
             feature_fn,
             [waveform, waveform_paddings],
@@ -63,8 +66,9 @@ def compute_normalizer(dataset, feature_fn):
             stateful=False,
         )
 
-    def sum_statistics(*row):
-        features, feature_paddings = row
+    def sum_statistics(
+        features: tf.Tensor, feature_paddings: tf.Tensor
+    ) -> Tuple[tf.Tensor, tf.Tensor, tf.Tensor]:
         features = tf.cast(features, tf.float64)
         feature_paddings = tf.cast(feature_paddings, tf.float64)
         features = features * (1.0 - feature_paddings)[..., tf.newaxis]
@@ -73,7 +77,9 @@ def compute_normalizer(dataset, feature_fn):
         second = tf.reduce_sum(features * features, axis=(0, 1))
         return (denom, first, second)
 
-    def reduce_statistics(xs, ys):
+    def reduce_statistics(
+        xs: Tuple[tf.Tensor, ...], ys: Tuple[tf.Tensor, ...]
+    ) -> Tuple[tf.Tensor, ...]:
         return tuple(x + y for x, y in zip(xs, ys))
 
     waves = dataset.map(
@@ -86,7 +92,6 @@ def compute_normalizer(dataset, feature_fn):
     stats = features.map(
         sum_statistics, num_parallel_calls=tf.data.AUTOTUNE, deterministic=False
     )
-    # feature_dims, = stats.element_spec[1].shape
     feature_dims = 80
     init_stats = (
         tf.zeros([], tf.float64),
@@ -94,11 +99,11 @@ def compute_normalizer(dataset, feature_fn):
         tf.zeros([feature_dims], tf.float64),
     )
     acc = init_stats
-    print(f"#Rows = {stats.cardinality()}")
-    # return stats.reduce(init_stats, reduce_statistics)
+    logging.info("#Batches = %d", stats.cardinality())
+    log_freq = stats.cardinality() // 30
     for i, x in enumerate(stats.as_numpy_iterator()):
-        if i % 10 == 0:
-            print(f"{i=}")
+        if i % log_freq == 0:
+            logging.info("%d batches processed.", i)
         acc = reduce_statistics(acc, x)
     return tuple(x.numpy() for x in acc)
 
@@ -120,16 +125,26 @@ def main(args: argparse.Namespace):
     var = second / denom - mean * mean
     stddev = np.sqrt(var)
     normalizer = asrio.MeanVarNormalizer(mean=mean, stddev=stddev, n=denom)
-    print(
-        f"FPS = {normalizer.n} frame / {elapsed_time} sec "
-        f"= {normalizer.n / elapsed_time} frame/sec"
+    logging.info(
+        "FPS = %d frame / %f sec = %f frame/sec",
+        normalizer.n,
+        elapsed_time,
+        normalizer.n / elapsed_time,
     )
-    print(normalizer)
+
+    json = bobbin.dump_pytree_json(normalizer)
+    logging.info("Normalizer: %s", json)
     with open(args.output_path, "w") as f:
-        f.write(bobbin.dump_pytree_json(normalizer))
+        f.write(json)
 
 
 if __name__ == "__main__":
+    logging.basicConfig(stream=sys.stderr)
+    logging.root.setLevel(logging.INFO)
+
+    # Disable TF's memory preallocation if TF is built with CUDA.
+    tf.config.experimental.set_visible_devices([], "GPU")
+
     argparser = argparse.ArgumentParser(description="Compute input normalizers")
     argparser.add_argument("--tfds_data_dir", type=str, default=None)
     argparser.add_argument("--output_path", type=str, default=None)

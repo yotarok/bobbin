@@ -20,7 +20,9 @@ from __future__ import annotations
 import argparse
 import dataclasses
 import functools
+import logging
 import pathlib
+import sys
 import tempfile
 import time
 from typing import Any, Dict, Optional, Sequence, Tuple
@@ -62,10 +64,6 @@ _WriteLog = bobbin.WriteLog
 
 
 _DEFAULT_WPM_VOCAB_URL = "https://raw.githubusercontent.com/tensorflow/lingvo/master/lingvo/tasks/asr/wpm_16k_librispeech.vocab"  # noqa: E501
-
-
-# Disable TF's memory preallocation if TF is built with CUDA.
-tf.config.experimental.set_visible_devices([], "GPU")
 
 
 def tokenize_dataset(wpm_vocab: asrio.WpmVocab, ds: tf.data.Dataset) -> tf.data.Dataset:
@@ -406,7 +404,7 @@ class EvalResults(bobbin.EvalResults):
         writer.scalar("eval/sent_error_rate", self.sentence_error_rate, step=step)
         writer.scalar("eval/sent_refs", self.num_sentences, step=step)
         if self.sentences_per_second is not None:
-            print(f"Sentences per sec (Eval) = {self.sentences_per_second}")
+            logging.info(f"Sentences per sec (Eval) = {self.sentences_per_second}")
             writer.scalar("eval/sent_per_sec", self.sentences_per_second, step=step)
 
         for hyp, ref, unused_sort_order in self.sampled_hyps:
@@ -618,13 +616,16 @@ def main(args: argparse.Namespace):
         "publish_tb", _ForEachNSteps(100), _PublishTrainingProgress(train_writer)
     )
 
-    print(f"Total #Params = {bobbin.total_dimensionality(init_train_state.params)}")
+    logging.info(
+        f"Total #Params = {bobbin.total_dimensionality(init_train_state.params)}"
+    )
     train_writer.text(
         "trainer/log/total_num_params",
         f"Number of parameters: {bobbin.total_dimensionality(init_train_state.params)}",
         step=init_train_state.step,
     )
-    print("START", time.time())
+
+    logging.info("MAIN LOOP STARTS")
     for batch in train_ds.as_numpy_iterator():
         train_state, step_info = train_step_fn(train_state, batch, next(prng_keys))
         train_state_0 = flax.jax_utils.unreplicate(train_state)
@@ -639,6 +640,12 @@ def main(args: argparse.Namespace):
 
 
 if __name__ == "__main__":
+    logging.basicConfig(stream=sys.stderr)
+    logging.root.setLevel(logging.INFO)
+
+    # Disable TF's memory preallocation if TF is built with CUDA.
+    tf.config.experimental.set_visible_devices([], "GPU")
+
     argparser = argparse.ArgumentParser(description="MNIST training")
     argparser.add_argument("--tfds_data_dir", type=str, default=None)
     argparser.add_argument("--feature_normalizer", type=str, default=None)
