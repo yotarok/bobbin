@@ -17,6 +17,8 @@
 
 # flake8: noqa: F401
 
+from .array_util import split_leading_axis
+
 from .cron import AtFirstNSteps
 from .cron import AtNthStep
 from .cron import CronTab

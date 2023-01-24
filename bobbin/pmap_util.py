@@ -21,23 +21,16 @@ import jax
 
 from .pytypes import Backend
 from .pytypes import Device
+from .array_util import split_leading_axis
 
 _ArrayTree = chex.ArrayTree
 
 
 def pmap_shard_tree(x: _ArrayTree, ndevices: int) -> _ArrayTree:
     """Reshapes `(N, ...)`-arrays in the tree into `(ndevices, N // ndevices, ...)`."""
-
-    def reshape_for_sharding(x):
-        size, *rest_dims = x.shape
-        if size % ndevices != 0:
-            raise ValueError(
-                "Size in leading axis of `x` must be a multiple "
-                f"of # of devices ({ndevices})."
-            )
-        return x.reshape((ndevices, size // ndevices) + tuple(rest_dims))
-
-    return jax.tree_util.tree_map(reshape_for_sharding, x)
+    return split_leading_axis(
+        ndevices, x, leading_axis_name="batch size", split_group_name="# of devices"
+    )
 
 
 class ArgType(metaclass=abc.ABCMeta):
