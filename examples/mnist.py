@@ -20,11 +20,11 @@ from __future__ import annotations
 import argparse
 import functools
 import logging
-import pathlib
 import sys
 from typing import Dict, Sequence, Tuple
 
 import chex
+from etils import epath
 import flax
 from flax import struct
 import flax.linen as nn
@@ -65,7 +65,7 @@ class CNNDenseClassifier(nn.Module):
     cnn_pool_shapes: Sequence[Sequence[int]] = ((2, 2), (2, 2))
     cnn_pool_strides: Sequence[Sequence[int]] = ((2, 2), (2, 2))
     cnn_dropout_rates: Sequence[float] = (0.2, 0.2)
-    normalize_cnn_out: bool = True  # Performs poorly, just for testing mutable vars
+    normalize_cnn_out: bool = True  # Performs poorly, just for demonstration
     dense_features: Sequence[int] = (256,)
     dense_dropout_rates: Sequence[float] = (0.0,)
 
@@ -340,6 +340,6 @@ if __name__ == "__main__":
     tf.config.experimental.set_visible_devices([], "GPU")
 
     argparser = argparse.ArgumentParser(description="MNIST training")
-    argparser.add_argument("--log_dir_path", type=pathlib.Path, default=None)
+    argparser.add_argument("--log_dir_path", type=epath.Path, default=None)
     args = argparser.parse_args()
     main(args)

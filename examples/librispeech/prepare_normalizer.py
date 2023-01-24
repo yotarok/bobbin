@@ -25,6 +25,7 @@ import time
 from typing import Dict, Optional, Tuple
 
 import bobbin
+from etils import epath
 import jax
 import numpy as np
 import tensorflow as tf
@@ -41,7 +42,7 @@ def prepare_datasets(
     tfds_data_dir: Optional[str] = None,
     wpm_vocab_path: str = "",
     wpm_size_limit: Optional[int] = None,
-) -> tuple[tf.data.Dataset, list[tf.data.Dataset]]:
+) -> tf.data.Dataset:
     builder_kwargs = dict(config="lazy_decode")
     return tfds.load(
         "librispeech",
@@ -110,7 +111,7 @@ def compute_normalizer(dataset, feature_fn):
 
 def main(args: argparse.Namespace):
     train_dataset = prepare_datasets(
-        tfds_data_dir=args.tfds_data_dir,
+        tfds_data_dir=str(args.tfds_data_dir),
     )
 
     def feature_fn(waveform, waveform_paddings):
@@ -134,8 +135,7 @@ def main(args: argparse.Namespace):
 
     json = bobbin.dump_pytree_json(normalizer)
     logging.info("Normalizer: %s", json)
-    with open(args.output_path, "w") as f:
-        f.write(json)
+    args.output_path.write_text(json)
 
 
 if __name__ == "__main__":
@@ -146,7 +146,7 @@ if __name__ == "__main__":
     tf.config.experimental.set_visible_devices([], "GPU")
 
     argparser = argparse.ArgumentParser(description="Compute input normalizers")
-    argparser.add_argument("--tfds_data_dir", type=str, default=None)
-    argparser.add_argument("--output_path", type=str, default=None)
+    argparser.add_argument("--tfds_data_dir", type=epath.Path, default=None)
+    argparser.add_argument("--output_path", type=epath.Path, default=None)
     args = argparser.parse_args()
     main(args)

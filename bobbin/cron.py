@@ -19,10 +19,10 @@ from __future__ import annotations
 import abc
 import logging
 import os
-import pathlib
 import time
 from typing import Any, Callable, Dict, Optional, Sequence, Tuple, Union
 
+from etils import epath
 import flax
 from flax import struct
 from flax.metrics import tensorboard as flax_tb
@@ -38,8 +38,6 @@ from .var_util import write_pytree_json_file
 
 _TrainState = flax.training.train_state.TrainState
 
-# For making type aliases "Tuple" is still needed as the code-execution
-# semantics will not be altered by "__future__.annotations".
 Action = Callable[..., Optional[Tuple[_TrainState, ...]]]
 
 
@@ -172,7 +170,7 @@ def _try_deserialize_eval_results(
 ) -> Optional[EvalResults]:
     try:
         return read_pytree_json_file(path, template)
-    except FileNotFoundError:
+    except Exception:
         pass
     return None
 
@@ -194,9 +192,9 @@ class RunEvalKeepBest:
     ):
         self._run_eval_action = run_eval_action
         self._tune_on = tune_on
-        self._dest_path = dest_path
+        self._dest_path = epath.Path(dest_path)
         self._current_best = None
-        self._results_path = pathlib.Path(self._dest_path) / "results.json"
+        self._results_path = self._dest_path / "results.json"
 
     def __call__(self, train_state, **kwargs):
         eval_results = self._run_eval_action(train_state, **kwargs)
