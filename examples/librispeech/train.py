@@ -583,7 +583,10 @@ def main(args: argparse.Namespace):
     init_train_state = train_state
     train_state = flax.jax_utils.replicate(train_state, jax.local_devices())
     train_step_fn = bobbin.pmap_for_train_step(
-        jax.jit(task.make_training_step_fn(), donate_argnums=(1,))
+        jax.jit(
+            task.make_training_step_fn(split_steps=args.split_training_batch),
+            donate_argnums=(1,),
+        )
     )
 
     train_writer = flax_tb.SummaryWriter(tensorboard_path / "train")
@@ -653,6 +656,7 @@ if __name__ == "__main__":
     argparser.add_argument("--wpm_vocab", type=str, default=None)
     argparser.add_argument("--wpm_size_limit", type=int, default=1024)
     argparser.add_argument("--log_dir_path", type=pathlib.Path, default=None)
+    argparser.add_argument("--split_training_batch", type=int, default=None)
 
     args = argparser.parse_args()
     main(args)

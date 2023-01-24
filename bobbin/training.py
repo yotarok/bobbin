@@ -25,6 +25,8 @@ import jax
 import jax.numpy as jnp
 import optax
 
+from .array_util import split_leading_axis
+
 from .pmap_util import wrapped_pmap
 from .pmap_util import RngArg
 from .pmap_util import ShardArg
@@ -35,6 +37,7 @@ from .pytypes import Parameter
 from .pytypes import VarCollection
 
 _Device = Any
+_Array = chex.Array
 _ArrayTree = chex.ArrayTree
 _Scalar = chex.Scalar
 _PRNGKey = chex.PRNGKey
@@ -75,6 +78,73 @@ class StepInfo:
 
 
 TrainingStepFn = Callable[[TrainState, Batch, _PRNGKey], Tuple[TrainState, StepInfo]]
+LossFnSideOutput = Tuple[VarCollection, _ArrayTree]  # mutated_vars and loss_aux
+LossFnResult = Tuple[_Scalar, LossFnSideOutput]
+ValueAndGradResult = Tuple[LossFnResult, _ArrayTree]
+ValueAndGradFn = Callable[[Parameter, Batch], ValueAndGradResult]
+
+
+def _split_and_apply_value_and_grad(
+    value_and_grad: ValueAndGradFn,
+    params: Parameter,
+    batch: Batch,
+    *,
+    split_steps: int,
+    extra_vars: VarCollection,
+    prng_key: _PRNGKey,
+) -> ValueAndGradResult:
+    """Applies value_and_grad function to split batches and merges results.
+
+    Args:
+      value_and_grad: Function that is obtained by applying
+        `jax.value_and_grad(f, has_aux=True)` to `compute_loss`.
+      params: Parameters passed to `compute_loss`
+      batch: A batch that is split and given to `compute_loss` sequentially.
+      split_steps: The number of splits used.
+      extra_vars: Extra var collection given to `compute_loss`.
+      prng_key: Base random-number generator.
+    """
+    if split_steps <= 0:
+        raise ValueError(f"Invalid split step ({split_steps}) specified.")
+    microbatches = split_leading_axis(
+        split_steps,
+        batch,
+        leading_axis_name="per-device batch",
+        split_group_name="split steps",
+    )
+
+    rng, prng_key = jax.random.split(prng_key)
+    (loss, (mutated_vars, loss_aux_0)), grads = value_and_grad(
+        params,
+        jax.tree_util.tree_map(lambda x: x[0], microbatches),
+        extra_vars=extra_vars,
+        prng_key=rng,
+    )
+    loss_aux_list = [loss_aux_0]
+    for step in range(1, split_steps):
+        rng, prng_key = jax.random.split(prng_key)
+        # Only the last step actually updates mutated_vars
+        (split_loss, (mutated_vars, split_aux)), split_grads = value_and_grad(
+            params,
+            jax.tree_util.tree_map(lambda x: x[step], microbatches),
+            extra_vars=extra_vars,
+            prng_key=prng_key,
+        )
+        loss += split_loss
+        loss_aux_list.append(split_aux)
+        grads = jax.tree_util.tree_map(lambda x, y: x + y, grads, split_grads)
+
+        # extra var mutation is applied sequentially.
+        for colname, tree in mutated_vars.items():
+            if colname not in extra_vars:
+                continue
+            extra_vars[colname] = mutated_vars[colname]
+
+    loss /= split_steps
+    grads = jax.tree_util.tree_map(lambda x: x / split_steps, grads)
+    loss_aux = jax.tree_util.tree_map(lambda *xs: jnp.asarray([xs]), *loss_aux_list)
+
+    return (loss, (mutated_vars, loss_aux)), grads
 
 
 class TrainTask:
@@ -87,12 +157,12 @@ class TrainTask:
         *,
         extra_vars: VarCollection,
         prng_key: _PRNGKey,
-    ) -> Tuple[_Scalar, Tuple[VarCollection, _ArrayTree]]:
+    ) -> LossFnResult:
         """Abstract method to be overridden for defining the loss function."""
         raise NotImplementedError()
 
     def make_training_step_fn(
-        self, pmap_axis_name: Optional[str] = "batch"
+        self, pmap_axis_name: Optional[str] = "batch", split_steps: Optional[int] = None
     ) -> TrainingStepFn:
         """Creates training step function."""
 
@@ -101,19 +171,31 @@ class TrainTask:
             batch: Batch,
             prng_key: _PRNGKey,
         ) -> Tuple[TrainState, StepInfo]:
-            (loss, (mutated_vars, loss_aux)), grads = jax.value_and_grad(
-                self.compute_loss, has_aux=True
-            )(
-                train_state.params,
-                batch,
-                extra_vars=train_state.extra_vars,
-                prng_key=prng_key,
-            )
+
+            value_and_grad = jax.value_and_grad(self.compute_loss, has_aux=True)
+            if split_steps is None:
+                (loss, (mutated_vars, loss_aux)), grads = value_and_grad(
+                    train_state.params,
+                    batch,
+                    extra_vars=train_state.extra_vars,
+                    prng_key=prng_key,
+                )
+            else:
+                (
+                    loss,
+                    (mutated_vars, loss_aux),
+                ), grads = _split_and_apply_value_and_grad(
+                    value_and_grad,
+                    train_state.params,
+                    batch,
+                    split_steps=split_steps,
+                    extra_vars=train_state.extra_vars,
+                    prng_key=prng_key,
+                )
 
             if pmap_axis_name is not None:
                 grads = jax.lax.pmean(grads, axis_name=pmap_axis_name)
             train_state = train_state.apply_gradients(grads=grads)
-
             updated_extra_vars = train_state.extra_vars.copy()
             for colname, tree in mutated_vars.items():
                 if colname == "params":
@@ -125,6 +207,7 @@ class TrainTask:
                     )
 
             train_state = train_state.replace(extra_vars=updated_extra_vars)
+
             return train_state, StepInfo(loss=loss, loss_aux_out=loss_aux)
 
         train_step_fn = jax.named_call(train_step_fn, name="train_step_fn")
