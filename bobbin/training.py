@@ -61,7 +61,7 @@ class TrainState(flax.training.train_state.TrainState):
 
     def is_replicated_for_pmap(self):
         """Check if `TrainState` is replicated for `pmap`."""
-        return jnp.array(self.step).ndim > 1
+        return jnp.array(self.step).ndim >= 1
 
 
 @struct.dataclass
@@ -171,6 +171,17 @@ class TrainTask:
             batch: Batch,
             prng_key: _PRNGKey,
         ) -> Tuple[TrainState, StepInfo]:
+            if pmap_axis_name is not None:
+                try:
+                    jax.lax.axis_index(pmap_axis_name)
+                except NameError:
+                    raise ValueError(
+                        "`make_training_step_fn` is called with "
+                        f"pmap_axis_name={pmap_axis_name} but this function is"
+                        "used outside of pmap context. If you do not intend to"
+                        "perform multi-device parallelization, set "
+                        "pmap_axis_name=None."
+                    )
 
             value_and_grad = jax.value_and_grad(self.compute_loss, has_aux=True)
             if split_steps is None:
