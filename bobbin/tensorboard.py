@@ -17,10 +17,10 @@ from __future__ import annotations
 
 import abc
 import os
-import pathlib
 from typing import Callable, Dict, Optional, Union
 
 import chex
+from etils import epath
 import flax
 from flax import struct
 from flax.metrics import tensorboard as flax_tb
@@ -156,7 +156,7 @@ def make_eval_results_writer(
         to this function must override`EvalResults.write_to_tensorboard` method.
         `state` is a `TrainState`.
     """
-    summary_root_dir = pathlib.Path(summary_root_dir)
+    summary_root_dir = epath.Path(summary_root_dir)
     writers = dict()
 
     def _tb_writer(res: Dict[str, EvalResults], st: _TrainState):

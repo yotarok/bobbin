@@ -1,4 +1,5 @@
-flax>=0.6.0
+etils
+flax>=0.6.3
 jax>=0.3.16
 matplotlib
 numpy>=1.18.0

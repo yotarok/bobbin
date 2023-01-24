@@ -19,9 +19,9 @@ from __future__ import annotations
 
 import argparse
 import dataclasses
+from etils import epath
 import functools
 import logging
-import pathlib
 import sys
 import tempfile
 import time
@@ -531,7 +531,7 @@ def fill_default_arguments(args: argparse.Namespace):
         args.wpm_vocab = f.name
         args.wpm_vocab_file = f
     if args.feature_normalizer is None:
-        p = pathlib.Path(__file__).parent / "librispeech.meanstddev.logmelfb80.json"
+        p = epath.Path(__file__).parent / "librispeech.meanstddev.logmelfb80.json"
         args.feature_normalizer = str(p)
 
 
@@ -649,13 +649,13 @@ if __name__ == "__main__":
     # Disable TF's memory preallocation if TF is built with CUDA.
     tf.config.experimental.set_visible_devices([], "GPU")
 
-    argparser = argparse.ArgumentParser(description="MNIST training")
+    argparser = argparse.ArgumentParser(description="LibriSpeech training")
     argparser.add_argument("--tfds_data_dir", type=str, default=None)
     argparser.add_argument("--feature_normalizer", type=str, default=None)
     argparser.add_argument("--per_device_batch_size", type=int, default=8)
     argparser.add_argument("--wpm_vocab", type=str, default=None)
     argparser.add_argument("--wpm_size_limit", type=int, default=1024)
-    argparser.add_argument("--log_dir_path", type=pathlib.Path, default=None)
+    argparser.add_argument("--log_dir_path", type=epath.Path, default="log")
     argparser.add_argument("--split_training_batch", type=int, default=None)
 
     args = argparser.parse_args()

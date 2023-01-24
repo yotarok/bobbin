@@ -15,11 +15,11 @@
 """Utility functions for handling variable collections."""
 
 import os
-import pathlib
 import json
 from typing import Any, Callable, Dict, Iterator, Optional, Tuple, Union
 
 import chex
+from etils import epath
 import flax
 import jax
 import jax.numpy as jnp
@@ -126,7 +126,7 @@ def dump_pytree_json(
 
 
 def write_pytree_json_file(path: Union[str, os.PathLike], tree: chex.ArrayTree) -> None:
-    pathlib.Path(path).write_text(dump_pytree_json(tree))
+    epath.Path(path).write_text(dump_pytree_json(tree))
 
 
 def parse_pytree_json(
@@ -139,7 +139,7 @@ def parse_pytree_json(
 def read_pytree_json_file(
     path: Union[str, os.PathLike], template: chex.ArrayTree
 ) -> Optional[chex.ArrayTree]:
-    json = pathlib.Path(path).read_text()
+    json = epath.Path(path).read_text()
     return parse_pytree_json(json, template)
 
 
