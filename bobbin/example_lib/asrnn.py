@@ -175,8 +175,9 @@ class CnnEncoder(nn.Module):
         (2, 2),
         (2, 2),
     )
+    use_bias: bool = False
     num_outputs: int = 256
-    use_batch_norm: bool = True
+    use_batch_norm: bool = False
     is_eval: Optional[bool] = None
 
     @nn.compact
@@ -207,7 +208,8 @@ class CnnEncoder(nn.Module):
                 features=features,
                 kernel_size=kernel_size,
                 strides=strides,
-                padding="VALID",
+                use_bias=self.use_bias,
+                padding="SAME",
             )(x)
             pad = jax.lax.reduce_window(
                 pad,
@@ -215,7 +217,7 @@ class CnnEncoder(nn.Module):
                 computation=jax.lax.min,
                 window_dimensions=[1, kernel_size[0]],
                 window_strides=[1, strides[0]],
-                padding="valid",
+                padding="SAME",
             )
             x = nn.activation.relu(x)
             if self.use_batch_norm:
@@ -237,6 +239,7 @@ class ConformerConvBlock(nn.Module):
 
     residual_dropout_prob: float = 0.0
     kernel_size: int = 5
+    use_conv_bias: bool = False
     deterministic: Optional[bool] = None
 
     @nn.compact
@@ -256,6 +259,7 @@ class ConformerConvBlock(nn.Module):
         x = nn.Conv(
             features=model_dims,
             kernel_size=(self.kernel_size,),
+            use_bias=self.use_conv_bias,
             feature_group_count=model_dims,
         )(x)
 
@@ -307,6 +311,17 @@ class ConformerFfnBlock(nn.Module):
         return x
 
 
+def _paddings_to_mask(paddings: _Array) -> _Array:
+    """Converts padding indicators into mask patterns for attention."""
+    *batch_sizes, time_steps = paddings.shape
+    flat_batch_size = np.product(batch_sizes) if batch_sizes else 1
+    flat_paddings = paddings.reshape((flat_batch_size, time_steps))
+    flat_padding_mask = (
+        jax.vmap(lambda p: p[:, np.newaxis] + p[np.newaxis, :])(flat_paddings) < 0.5
+    )
+    return flat_padding_mask.reshape(tuple(batch_sizes) + (1, time_steps, time_steps))
+
+
 class ConformerMhsaBlock(nn.Module):
     """Multi-head self-attention module used in Conformer blocks.
 
@@ -335,15 +350,7 @@ class ConformerMhsaBlock(nn.Module):
         )
         x = nn.LayerNorm()(x)
 
-        *batch_sizes, time_steps = x_paddings.shape
-        flat_batch_size = np.product(batch_sizes)
-        flat_paddings = x_paddings.reshape((flat_batch_size, time_steps))
-        flat_padding_mask = (
-            jax.vmap(lambda p: p[:, np.newaxis] + p[np.newaxis, :])(flat_paddings) < 0.5
-        )
-        padding_mask = flat_padding_mask.reshape(
-            tuple(batch_sizes) + (1, time_steps, time_steps)
-        )
+        padding_mask = _paddings_to_mask(x_paddings)
         x = nn.SelfAttention(self.num_heads, dropout_rate=self.attention_dropout_prob)(
             x,
             mask=padding_mask,
@@ -460,6 +467,8 @@ def _build_1d_masks(
 
 
 class SpecAug(nn.Module):
+    """SpecAug module."""
+
     freq_mask_max_bins: int = 27
     freq_mask_count: int = 2
     time_mask_count: int = 10
