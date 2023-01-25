@@ -38,13 +38,6 @@ import tensorflow_datasets as tfds
 
 import bobbin
 
-_Array = chex.Array
-_Batch = bobbin.Batch
-_DenyList = flax.core.scope.DenyList
-_Parameter = bobbin.Parameter
-_PRNGKey = chex.PRNGKey
-_Scalar = chex.Scalar
-_TrainState = bobbin.TrainState
 _VarCollection = bobbin.VarCollection
 
 
@@ -120,9 +113,9 @@ def preprocess_ds(
 
 @struct.dataclass
 class EvalResults(bobbin.EvalResults):
-    correct_count: _Scalar
-    predict_count: _Scalar
-    sum_logprobs: _Scalar
+    correct_count: chex.Scalar
+    predict_count: chex.Scalar
+    sum_logprobs: chex.Scalar
 
     @property
     def accuracy(self) -> float:
@@ -151,7 +144,7 @@ class EvalResults(bobbin.EvalResults):
         return self.accuracy > other.accuracy
 
     def write_to_tensorboard(
-        self, current_train_state: _TrainState, writer: flax_tb.SummaryWriter
+        self, current_train_state: bobbin.TrainState, writer: flax_tb.SummaryWriter
     ) -> None:
         step = current_train_state.step
         writer.scalar("accuracy", self.accuracy, step=step)
@@ -160,9 +153,9 @@ class EvalResults(bobbin.EvalResults):
 
 @struct.dataclass
 class LossAuxOut:
-    logits: _Array
-    per_sample_loss: _Array
-    predicted_labels: _Array
+    logits: chex.Array
+    per_sample_loss: chex.Array
+    predicted_labels: chex.Array
 
 
 class ClassificationTask(bobbin.TrainTask):
@@ -171,12 +164,12 @@ class ClassificationTask(bobbin.TrainTask):
 
     def compute_loss(
         self,
-        params: _Parameter,
-        batch: _Batch,
+        params: bobbin.Parameter,
+        batch: bobbin.Batch,
         *,
         extra_vars: _VarCollection,
-        prng_key: _PRNGKey,
-    ) -> Tuple[_Scalar, Tuple[_VarCollection, LossAuxOut]]:
+        prng_key: chex.PRNGKey,
+    ) -> Tuple[chex.Scalar, Tuple[_VarCollection, LossAuxOut]]:
         inputs, labels = batch
         model_vars = extra_vars.copy()
         model_vars.update(params=params, intermediates=dict())
@@ -214,7 +207,9 @@ class EvalTask(bobbin.EvalTask):
         wrap_return=EvalResults.unshard_and_reduce,
     )
     @functools.partial(jax.jit, static_argnums=(0,), donate_argnums=(1,))
-    def evaluate(self, batch: _Batch, model_vars: _VarCollection) -> EvalResults:
+    def evaluate(
+        self, batch: bobbin.Batch, model_vars: bobbin.VarCollection
+    ) -> EvalResults:
         inputs, labels = batch
         logits = self.model.apply(model_vars, inputs, is_eval=True)
         predicts = logits.argmax(axis=-1)
