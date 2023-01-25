@@ -25,7 +25,7 @@ import logging
 import sys
 import tempfile
 import time
-from typing import Any, Dict, Optional, Sequence, Tuple
+from typing import Any, Dict, List, Optional, Sequence, Tuple
 import urllib.request
 
 import chex
@@ -404,7 +404,9 @@ class EvalResults(bobbin.EvalResults):
             )
 
 
-def _recover_padded_tokens(token_ids: np.ndarray, paddings: np.ndarray) -> np.ndarray:
+def _recover_padded_tokens(
+    token_ids: np.ndarray, paddings: np.ndarray
+) -> List[List[int]]:
     token_ids = np.asarray(token_ids).tolist()
     return [
         [lab for pad, lab in zip(pads, padded_ids) if pad < 0.5]

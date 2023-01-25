@@ -493,6 +493,10 @@ class SpecAug(nn.Module):
             mask = mask.reshape(mask.shape + (1,) * len(channels))
             x = x * mask
         if self.time_mask_count > 0:
+            if paddings is None:
+                raise ValueError(
+                    "Specify `paddings` when using `SpecAug` with time masks."
+                )
             lengths = time_steps - paddings.sum(axis=-1)
             widths = lengths * self.time_mask_max_ratio
             mask = _build_1d_masks(
