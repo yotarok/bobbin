@@ -20,7 +20,18 @@ import abc
 import logging
 import os
 import time
-from typing import Any, Callable, Dict, Optional, Sequence, Tuple, Union
+from typing import (
+    Any,
+    Callable,
+    Dict,
+    Iterable,
+    Iterator,
+    Mapping,
+    Optional,
+    Sequence,
+    Tuple,
+    Union,
+)
 
 from etils import epath
 import flax
@@ -28,10 +39,13 @@ from flax import struct
 from flax.metrics import tensorboard as flax_tb
 from flax.training import checkpoints
 
+from .pytypes import Batch
 from .tensorboard import publish_train_intermediates
+from .tensorboard import make_eval_results_writer
 from .training import TrainState as BobbinTrainState
 from .training import StepInfo
 from .evaluation import EvalResults
+from .evaluation import EvalTask
 from .evaluation import eval_datasets
 from .var_util import read_pytree_json_file
 from .var_util import write_pytree_json_file
@@ -119,21 +133,32 @@ class AtFirstNSteps(Trigger):
 class AtNthStep(Trigger):
     """Trigger that fires at `N`-th step."""
 
-    def __init__(self, n: int):
+    def __init__(self, ns: Union[int, Iterable[int]]):
         super().__init__()
-        self._n = n
+        if isinstance(ns, int):
+            ns = [ns]
+        self._ns = set(ns)
 
     def check(self, train_state: _TrainState) -> bool:
-        return train_state.step == self._n
+        return int(train_state.step) in self._ns
 
 
 class RunEval:
     """Action that runs evaluation processes."""
 
-    def __init__(self, eval_task, eval_batch_gens):
+    def __init__(
+        self,
+        eval_task: EvalTask,
+        eval_batch_gens: Mapping[str, Iterator[Batch]],
+        tensorboard_root_path: Union[None, str, os.PathLike[str]] = None,
+    ):
         self._eval_task = eval_task
         self._eval_batch_gens = eval_batch_gens
         self._result_processors = []
+
+        if tensorboard_root_path is not None:
+            writers = make_eval_results_writer(tensorboard_root_path)
+            self.add_result_processor(writers)
 
     def __call__(self, train_state: _TrainState, **unused_kwargs):
         if not isinstance(train_state, BobbinTrainState):
@@ -294,6 +319,45 @@ class CronTab:
 
     def __init__(self):
         self._actions = []
+
+    def schedule(
+        self,
+        action: Action,
+        *,
+        name: str = None,
+        step_interval: Optional[int] = None,
+        at_step: Union[None, int, Iterable[int]] = None,
+        at_first_steps: Optional[int] = None,
+        at_first_steps_of_process: Optional[int] = None,
+        time_interval: Optional[float] = None,
+    ) -> CronTab:
+        triggers = []
+        if step_interval is not None:
+            triggers.append(ForEachNSteps(step_interval))
+        if at_step is not None:
+            triggers.append(AtNthStep(at_step))
+        if at_first_steps is not None:
+            triggers.append(AtFirstNSteps(at_first_steps, of_process=False))
+        if at_first_steps_of_process is not None:
+            triggers.append(AtFirstNSteps(at_first_steps_of_process, of_process=True))
+        if time_interval is not None:
+            triggers.append(ForEachTSeconds(time_interval))
+
+        trigger = None
+        if len(triggers) == 0:
+            raise ValueError(
+                "None of timing arguments is specified in `CronTab.schedule`. "
+                "Specify at least one of: step_interval, at_step, at_first_steps, "
+                "at_first_steps_of_process, time_interval."
+            )
+        elif len(triggers) == 1:
+            trigger = triggers[0]
+        else:
+            trigger = OrTrigger(*triggers)
+
+        if name is None:
+            name = repr(action)
+        return self.add(name, trigger, action)
 
     def add(self, name: str, trigger: Trigger, action: Action) -> CronTab:
         self._actions.append((name, trigger, action))

@@ -90,6 +90,22 @@ class TriggerTest(chex.TestCase):
             state = state.replace(step=step)
             self.assertEqual(trigger.check(state), step <= 5 or step % 3 == 0)
 
+    def test_trigger_creation_by_schedule(self):
+        state = flax.training.train_state.TrainState.create(
+            apply_fn=None, params=None, tx=optax.identity()
+        )
+        crontab = cron.CronTab()
+
+        def do_nothing(*unused_args):
+            pass
+
+        crontab.schedule(do_nothing, step_interval=123, at_first_steps=10)
+        unused_name, trigger, unused_action = crontab._actions[0]
+        np.testing.assert_(trigger.check(state.replace(step=123)))
+        np.testing.assert_(not trigger.check(state.replace(step=124)))
+        np.testing.assert_(trigger.check(state.replace(step=3)))
+        np.testing.assert_(not trigger.check(state.replace(step=11)))
+
 
 class TrainingProgressPublisherTest(chex.TestCase):
     @unittest.mock.patch("time.time")

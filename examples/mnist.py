@@ -48,16 +48,6 @@ _TrainState = bobbin.TrainState
 _VarCollection = bobbin.VarCollection
 
 
-_AtFirstNSteps = bobbin.AtFirstNSteps
-_AtNthStep = bobbin.AtNthStep
-_ForEachNSteps = bobbin.ForEachNSteps
-_ForEachTSeconds = bobbin.ForEachTSeconds
-_RunEval = bobbin.RunEval
-_PublishTrainingProgress = bobbin.PublishTrainingProgress
-_SaveCheckpoint = bobbin.SaveCheckpoint
-_WriteLog = bobbin.WriteLog
-
-
 class CNNDenseClassifier(nn.Module):
     num_classes: int = 10
     cnn_features: Sequence[int] = (32, 64)
@@ -297,32 +287,27 @@ def main(args: argparse.Namespace):
         f"Number of parameters: {bobbin.total_dimensionality(init_train_state.params)}",
         step=init_train_state.step,
     )
-    eval_writers = bobbin.make_eval_results_writer(tensorboard_path)
     warmup = 5
     crontab = bobbin.CronTab()
-    crontab.add(
-        "eval_and_keep_best",
-        _ForEachNSteps(1000) | _AtNthStep(warmup),
-        _RunEval(evaler, eval_batch_gens)
-        .add_result_processor(eval_writers)
-        .and_keep_best_checkpoint(
+    crontab.schedule(
+        bobbin.RunEval(
+            evaler, eval_batch_gens, tensorboard_root_path=tensorboard_path
+        ).and_keep_best_checkpoint(
             "dev",
             best_checkpoint_path,
         ),
+        step_interval=1000,
+        at_step=warmup,
     )
-    crontab.add(
-        "save_job_checkpoint",
-        _ForEachNSteps(1000) | _AtNthStep(warmup),
-        _SaveCheckpoint(all_checkpoint_path),
+    crontab.schedule(
+        bobbin.SaveCheckpoint(all_checkpoint_path),
+        step_interval=1000,
+        at_step=warmup,
     )
-    crontab.add(
-        "heartbeat",
-        _ForEachTSeconds(10.0) | _AtFirstNSteps(warmup, of_process=True),
-        _WriteLog(),
+    crontab.schedule(
+        bobbin.WriteLog(), time_interval=10.0, at_first_steps_of_process=warmup
     )
-    crontab.add(
-        "publish_tb", _ForEachNSteps(100), _PublishTrainingProgress(train_writer)
-    )
+    crontab.schedule(bobbin.PublishTrainingProgress(train_writer), step_interval=100)
 
     steps_done = 0
     logging.info("Main loop started.")
