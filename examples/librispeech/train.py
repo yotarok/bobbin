@@ -53,15 +53,6 @@ _TrainState = bobbin.TrainState
 _VarCollection = bobbin.VarCollection
 _ModuleDef = Any
 
-_AtFirstNSteps = bobbin.AtFirstNSteps
-_AtNthStep = bobbin.AtNthStep
-_ForEachNSteps = bobbin.ForEachNSteps
-_ForEachTSeconds = bobbin.ForEachTSeconds
-_PublishTrainingProgress = bobbin.PublishTrainingProgress
-_RunEval = bobbin.RunEval
-_SaveCheckpoint = bobbin.SaveCheckpoint
-_WriteLog = bobbin.WriteLog
-
 
 _DEFAULT_WPM_VOCAB_URL = "https://raw.githubusercontent.com/tensorflow/lingvo/master/lingvo/tasks/asr/wpm_16k_librispeech.vocab"  # noqa: E501
 
@@ -590,34 +581,26 @@ def main(args: argparse.Namespace):
     )
 
     train_writer = flax_tb.SummaryWriter(tensorboard_path / "train")
-    eval_writers = bobbin.make_eval_results_writer(tensorboard_path)
 
     eval_freq = num_train_samples // batch_size
     warmup = 10
     crontab = bobbin.CronTab()
-    crontab.add(
-        "eval_and_keep_best",
-        _ForEachNSteps(eval_freq),
-        _RunEval(evaler, eval_batch_gens)
-        .add_result_processor(eval_writers)
-        .and_keep_best_checkpoint(
+    crontab.schedule(
+        bobbin.RunEval(
+            evaler, eval_batch_gens, tensorboard_root_path=tensorboard_path
+        ).and_keep_best_checkpoint(
             "dev",
             best_checkpoint_path,
         ),
+        step_interval=eval_freq,
     )
-    crontab.add(
-        "save_job_checkpoint",
-        _ForEachNSteps(1000) | _AtNthStep(warmup),
-        _SaveCheckpoint(all_checkpoint_path),
+    crontab.schedule(
+        bobbin.SaveCheckpoint(all_checkpoint_path), step_interval=1000, at_step=warmup
     )
-    crontab.add(
-        "heartbeat",
-        _ForEachTSeconds(30.0) | _AtFirstNSteps(warmup, of_process=True),
-        _WriteLog(),
+    crontab.schedule(
+        bobbin.WriteLog(), time_interval=30.0, at_first_steps_of_process=warmup
     )
-    crontab.add(
-        "publish_tb", _ForEachNSteps(100), _PublishTrainingProgress(train_writer)
-    )
+    crontab.schedule(bobbin.PublishTrainingProgress(train_writer), step_interval=100)
 
     logging.info(
         f"Total #Params = {bobbin.total_dimensionality(init_train_state.params)}"
