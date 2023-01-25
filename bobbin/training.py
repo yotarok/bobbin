@@ -119,7 +119,7 @@ def _split_and_apply_value_and_grad(
         jax.tree_util.tree_map(lambda x: x[0], microbatches),
         extra_vars=extra_vars,
         prng_key=rng,
-    )
+    )  # pytype: disable=wrong-keyword-args
     loss_aux_list = [loss_aux_0]
     for step in range(1, split_steps):
         rng, prng_key = jax.random.split(prng_key)
@@ -129,7 +129,7 @@ def _split_and_apply_value_and_grad(
             jax.tree_util.tree_map(lambda x: x[step], microbatches),
             extra_vars=extra_vars,
             prng_key=prng_key,
-        )
+        )  # pytype: disable=wrong-keyword-args
         loss += split_loss
         loss_aux_list.append(split_aux)
         grads = jax.tree_util.tree_map(lambda x, y: x + y, grads, split_grads)
