@@ -25,7 +25,7 @@ import logging
 import sys
 import tempfile
 import time
-from typing import Any, Dict, List, Optional, Sequence, Tuple
+from typing import Dict, List, Optional, Sequence, Tuple
 import urllib.request
 
 import chex
@@ -46,12 +46,7 @@ from bobbin.example_lib import asrnn
 
 _Array = chex.Array
 _Batch = bobbin.Batch
-_Parameter = bobbin.Parameter
-_PRNGKey = chex.PRNGKey
-_Scalar = chex.Scalar
-_TrainState = bobbin.TrainState
 _VarCollection = bobbin.VarCollection
-_ModuleDef = Any
 
 
 _DEFAULT_WPM_VOCAB_URL = "https://raw.githubusercontent.com/tensorflow/lingvo/master/lingvo/tasks/asr/wpm_16k_librispeech.vocab"  # noqa: E501
@@ -231,7 +226,7 @@ class CtcAsrTask(bobbin.TrainTask):
 
     def compute_loss(
         self, params, batch, *, extra_vars, prng_key
-    ) -> Tuple[_Scalar, Tuple[_VarCollection, LossAuxOut]]:
+    ) -> Tuple[chex.Scalar, Tuple[_VarCollection, LossAuxOut]]:
         model_vars = extra_vars.copy()
         model_vars.update(params=params, intermediates=dict())
         rng_dropout, rng_specaug = jax.random.split(prng_key)
@@ -386,7 +381,7 @@ class EvalResults(bobbin.EvalResults):
         return self.word_error.error_rate < other.word_error.error_rate
 
     def write_to_tensorboard(
-        self, current_train_state: _TrainState, writer: flax_tb.SummaryWriter
+        self, current_train_state: bobbin.TrainState, writer: flax_tb.SummaryWriter
     ) -> None:
         step = current_train_state.step
         _write_error_to_tensorboard(self.token_error, writer, "token", step, "eval/")
@@ -395,7 +390,7 @@ class EvalResults(bobbin.EvalResults):
         writer.scalar("eval/sent_error_rate", self.sentence_error_rate, step=step)
         writer.scalar("eval/sent_refs", self.num_sentences, step=step)
         if self.sentences_per_second is not None:
-            logging.info(f"Sentences per sec (Eval) = {self.sentences_per_second}")
+            logging.info("Sentences per sec (Eval) = %f", self.sentences_per_second)
             writer.scalar("eval/sent_per_sec", self.sentences_per_second, step=step)
 
         for hyp, ref, unused_sort_order in self.sampled_hyps:
@@ -605,7 +600,7 @@ def main(args: argparse.Namespace):
     crontab.schedule(bobbin.PublishTrainingProgress(train_writer), step_interval=100)
 
     logging.info(
-        f"Total #Params = {bobbin.total_dimensionality(init_train_state.params)}"
+        "Total #Params = %d", bobbin.total_dimensionality(init_train_state.params)
     )
     train_writer.text(
         "trainer/log/total_num_params",
