@@ -462,7 +462,6 @@ def _build_1d_masks(
 class SpecAug(nn.Module):
     freq_mask_max_bins: int = 27
     freq_mask_count: int = 2
-    time_mask_max_frames: int = 10
     time_mask_count: int = 10
     time_mask_max_ratio: float = 0.05
     deterministic: Optional[bool] = None

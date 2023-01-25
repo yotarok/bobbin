@@ -324,12 +324,16 @@ def main(args: argparse.Namespace):
         "publish_tb", _ForEachNSteps(100), _PublishTrainingProgress(train_writer)
     )
 
+    steps_done = 0
     logging.info("Main loop started.")
     for batch in train_ds.as_numpy_iterator():
         train_state, step_info = train_step_fn(train_state, batch, next(prng_keys))
         train_state_0 = flax.jax_utils.unreplicate(train_state)
         crontab.run(train_state_0, step_info=step_info)
         del train_state.extra_vars["tensorboard"]
+        steps_done += 1
+        if args.max_steps is not None and steps_done >= args.max_steps:
+            break
 
 
 if __name__ == "__main__":
@@ -341,5 +345,6 @@ if __name__ == "__main__":
 
     argparser = argparse.ArgumentParser(description="MNIST training")
     argparser.add_argument("--log_dir_path", type=epath.Path, default=None)
+    argparser.add_argument("--max_steps", type=int, default=None)
     args = argparser.parse_args()
     main(args)
