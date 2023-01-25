@@ -30,8 +30,8 @@ black --check bobbin examples tests
 flake8 --ignore=E203,W503 --max-line-length=88 bobbin examples tests
 
 ## type checking
-pytype -P . bobbin bobbin/example_lib tests
+pytype -j auto -P . bobbin bobbin/example_lib tests
 
 ## tests
-PYTHONPATH=. pytest tests
+PYTHONPATH=. pytest -n auto tests
 

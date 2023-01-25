@@ -73,6 +73,21 @@ class LogMelFilterBankTest(chex.TestCase):
             ),
         )
 
+    def test_with_zero_input(self):
+        batch_size = 3
+        max_length = 700
+        module = asrnn.LogMelFilterBank(num_bins=5)
+        np.testing.assert_array_less(0.0, module.output_log_floor)
+
+        waveform = np.zeros((batch_size, max_length))
+        inputs = (waveform, np.zeros_like(waveform, dtype=np.float32))
+
+        # No parameters and no random variables,
+        model_vars = module.init(jax.random.PRNGKey(0), *inputs)
+        outputs, output_paddings = module.apply(model_vars, *inputs)
+        for v in outputs:
+            np.testing.assert_allclose(v, np.log(module.output_log_floor))
+
 
 class CnnEncoderTest(chex.TestCase):
     @parameterized.named_parameters(("train", False), ("eval", True))
@@ -164,6 +179,59 @@ class SpecAugTest(chex.TestCase):
                 _random_right_paddings(batch_size, time_steps, min_length=1),
             ),
             dict(deterministic=deterministic),
+        )
+
+    def test_mask_shape(self):
+        batch_size = 1
+        freq_bins = 80
+        time_steps = 100
+
+        inputs = (
+            np.ones((batch_size, time_steps, freq_bins)),
+            np.zeros((batch_size, time_steps)),
+        )
+        module = asrnn.SpecAug(
+            freq_mask_count=1, time_mask_count=1, time_mask_max_ratio=0.3
+        )
+        model_vars = module.init(
+            {"specaug": jax.random.PRNGKey(0)}, *inputs, deterministic=False
+        )
+        mask = module.apply(
+            model_vars,
+            *inputs,
+            deterministic=False,
+            rngs={"specaug": jax.random.PRNGKey(1)}
+        )
+
+        def check_masks(m):
+            # Check if all the mask vectors are zeros, or identical to other
+            # non-zero mask vectors.
+            first_valid_mask = None
+            mask_lengths = []
+            current_mask_len = 0
+            for row in mask:
+                if (mask == 0.0).all():
+                    current_mask_len += 1
+                else:
+                    if current_mask_len > 0:
+                        mask_lengths.append(current_mask_len)
+                    current_mask_len = 0
+                    if first_valid_mask is None:
+                        first_valid_mask = row
+                    np.testing.assert_allclose(row, first_valid_mask)
+            np.testing.assert_(first_valid_mask is not None)
+            if current_mask_len > 0:
+                mask_lengths.append(current_mask_len)
+            return mask_lengths
+
+        time_mask_lengths = check_masks(mask)
+        freq_mask_lengths = check_masks(mask.T)
+
+        np.testing.assert_(len(freq_mask_lengths) <= 1)
+        np.testing.assert_array_less(freq_mask_lengths, module.freq_mask_max_bins)
+        np.testing.assert_(len(time_mask_lengths) <= 1)
+        np.testing.assert_array_less(
+            time_mask_lengths, int(module.time_mask_max_ratio * time_steps)
         )
 
 
