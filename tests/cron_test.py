@@ -150,7 +150,7 @@ class RunEvalKeepBestActionTest(chex.TestCase):
         action(train_state)
         write_json.assert_called_once()
         dest_path, wrote_metric = write_json.call_args.args
-        np.testing.assert_equal(str(dest_path), result_url)
+        np.testing.assert_equal(dest_path.as_uri(), result_url)
         np.testing.assert_equal(wrote_metric.value, 2.0)
         write_json.reset_mock()
         read_json.reset_mock()
@@ -169,7 +169,7 @@ class RunEvalKeepBestActionTest(chex.TestCase):
         action(train_state)
         read_json.assert_called_once()
         src, tree = read_json.call_args.args
-        np.testing.assert_equal(str(src), result_url)
+        np.testing.assert_equal(src.as_uri(), result_url)
 
 
 if __name__ == "__main__":

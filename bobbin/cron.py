@@ -324,7 +324,7 @@ class CronTab:
         self,
         action: Action,
         *,
-        name: str = None,
+        name: Optional[str] = None,
         step_interval: Optional[int] = None,
         at_step: Union[None, int, Iterable[int]] = None,
         at_first_steps: Optional[int] = None,
