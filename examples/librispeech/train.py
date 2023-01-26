@@ -290,6 +290,8 @@ class EvalResults(bobbin.EvalResults):
     num_sentence_errors: int = 0
     start_time: Optional[float] = None
     end_time: Optional[float] = None
+    sampled_results: bobbin.SampledSet[Tuple[str, str]] = bobbin.SampledSet(max_size=3)
+
     num_result_samples: int = 3
     sampled_hyps: Sequence[tuple[str, str, float]] = ()
 
@@ -323,7 +325,7 @@ class EvalResults(bobbin.EvalResults):
 
     def to_log_message(self) -> str:
         sample_summary = ""
-        for hyp, ref, unused_sort_order in self.sampled_hyps:
+        for hyp, ref in self.sampled_results:
             sample_summary += f" REF: {ref}\n" f" HYP: {hyp}\n"
         return (
             "Token: "
@@ -348,7 +350,7 @@ class EvalResults(bobbin.EvalResults):
             start_time=self.start_time,
             end_time=self.end_time,
             num_result_samples=self.num_result_samples,
-            sampled_hyps=self.sampled_hyps,
+            sampled_results=self.sampled_results,
         )
         return EvalResults(**kwargs)
 
@@ -369,12 +371,7 @@ class EvalResults(bobbin.EvalResults):
             end_time = max(self.end_time, other.end_time)
         kwargs.update(start_time=start_time, end_time=end_time)
 
-        sampled_hyps = list(self.sampled_hyps) + list(other.sampled_hyps)
-        sampled_hyps.sort(key=lambda x: x[2])
-        sampled_hyps = tuple(sampled_hyps[: self.num_result_samples])
-        kwargs.update(
-            num_result_samples=self.num_result_samples, sampled_hyps=sampled_hyps
-        )
+        kwargs.update(sampled_results=self.sampled_results.union(other.sampled_results))
         return EvalResults(**kwargs)
 
     def is_better_than(self, other: EvalResults) -> bool:
@@ -393,7 +390,7 @@ class EvalResults(bobbin.EvalResults):
             logging.info("Sentences per sec (Eval) = %f", self.sentences_per_second)
             writer.scalar("eval/sent_per_sec", self.sentences_per_second, step=step)
 
-        for hyp, ref, unused_sort_order in self.sampled_hyps:
+        for hyp, ref in self.sampled_results:
             writer.text(
                 "eval/sampled_results", f"```\nREF: {ref}\nHYP: {hyp}\n```", step=step
             )
@@ -449,7 +446,7 @@ class EvalTask(bobbin.EvalTask):
         predicts = np.asarray(predicts)
         predict_paddings = np.asarray(predict_paddings)
 
-        sampled_hyps = []
+        sampled_results = bobbin.SampledSet(max_size=3)
 
         results = EvalResults()
         batched_hyp_ids = _recover_padded_tokens(predicts, predict_paddings)
@@ -481,7 +478,7 @@ class EvalTask(bobbin.EvalTask):
             if hyp_text != ref_text:
                 sent_err += 1
 
-            sampled_hyps.append((hyp_text, ref_text, np.random.uniform()))
+            sampled_results = sampled_results.add((hyp_text, ref_text))
 
         return dataclasses.replace(
             results,
@@ -490,7 +487,7 @@ class EvalTask(bobbin.EvalTask):
             char_error=acc_char_error,
             num_sentences=results.num_sentences + len(batched_hyp_ids),
             num_sentence_errors=results.num_sentence_errors + sent_err,
-            sampled_hyps=tuple(sampled_hyps),
+            sampled_results=sampled_results,
         )
 
 
