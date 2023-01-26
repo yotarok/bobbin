@@ -17,10 +17,12 @@
 
 from __future__ import annotations
 
-from typing import Dict, Iterable
+import collections
+from typing import Dict, Generic, Iterable, Iterator, Tuple, TypeVar
 
 from flax import struct
 from flax.metrics import tensorboard as flax_tb
+import numpy as np
 
 from .pmap_util import unshard
 from .pytypes import Batch
@@ -153,3 +155,54 @@ def eval_datasets(
     for dsname, batch_gen in batch_gens.items():
         results[dsname] = eval_batches(eval_task, batch_gen(), *args, **kwargs)
     return results
+
+
+T = TypeVar("T")
+
+
+@struct.dataclass
+class SampledSet(collections.abc.Collection, Generic[T]):
+    """Immutable set containing the fixed number samples from the elements added."""
+
+    max_size: int
+    values: Tuple[T] = ()
+    priorities: Tuple[float] = ()
+
+    def __contains__(self, q: T) -> bool:
+        return q in self.values
+
+    def __iter__(self) -> Iterator[T]:
+        return iter(self.values)
+
+    def __len__(self) -> int:
+        return len(self.values)
+
+    def _draw_priority(self, x: T) -> float:
+        del x
+        return np.random.uniform()
+
+    def add(self, x: T) -> SampledSet[T]:
+        """Returns `SampledSet` with the given element `x` added to this set."""
+        pairs = list(zip(self.values, self.priorities))
+        pairs.append((x, self._draw_priority(x)))
+        pairs.sort(key=lambda x: x[1])
+        nvalues, npriorities = zip(*pairs[: self.max_size])
+        return self.replace(values=tuple(nvalues), priorities=tuple(npriorities))
+
+    def union(self, iterable: Iterable[T]) -> SampledSet[T]:
+        """Returns the union of this set and the given set."""
+        pairs = list(zip(self.values, self.priorities))
+        if isinstance(iterable, SampledSet):
+            other_pairs = list(zip(iterable.values, iterable.priorities))
+        else:
+            other_pairs = [(elem, self._draw_priority(elem)) for elem in iterable]
+        pairs.extend(other_pairs)
+        pairs.sort(key=lambda x: x[1])
+
+        if len(pairs) == 0:
+            nvalues = []
+            npriorities = []
+        else:
+            nvalues, npriorities = zip(*pairs[: self.max_size])
+
+        return self.replace(values=tuple(nvalues), priorities=tuple(npriorities))

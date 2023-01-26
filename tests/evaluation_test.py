@@ -16,6 +16,8 @@
 
 from __future__ import annotations
 
+import unittest
+
 from absl.testing import absltest
 import chex
 import flax
@@ -119,8 +121,52 @@ class EvalTaskTest(chex.TestCase):
         )
         eval_task = SumEvalTask()
         results = evaluation.eval_datasets(eval_task, batch_gens)
-        assert "set1" in results
-        assert "set2" in results
+        np.testing.assert_("set1" in results)
+        np.testing.assert_("set2" in results)
+
+
+class SampledSetTest(chex.TestCase):
+    def test_size(self):
+        s = evaluation.SampledSet(5)
+
+        np.testing.assert_equal(len(s), 0)
+        num_add = 30
+        for n in range(num_add):
+            s = s.add(n)
+            np.testing.assert_equal(len(s), min(n + 1, 5))
+
+    def test_size_of_union_with_iterables(self):
+        s = evaluation.SampledSet(5)
+
+        np.testing.assert_equal(len(s), 0)
+        num_add = 4
+        for n in range(num_add):
+            s = s.union(range(n))
+
+        np.testing.assert_equal(len(s), 5)
+
+    def test_size_of_union_with_sampled_set(self):
+        s = evaluation.SampledSet(5)
+
+        np.testing.assert_equal(len(s), 0)
+        num_add = 4
+        for n in range(num_add):
+            y = evaluation.SampledSet(10).union(range(n))
+            s = s.union(y)
+
+        np.testing.assert_equal(len(s), 5)
+
+    @unittest.mock.patch(
+        "bobbin.evaluation.SampledSet._draw_priority", new=lambda self, x: -x
+    )
+    def test_with_mocked_priority(self):
+        s = evaluation.SampledSet(5)
+        num_add = 5
+        for n in range(num_add):
+            print(s)
+            s = s.union(range(n))
+
+        np.testing.assert_equal(tuple(s), (3, 2, 2, 1, 1))
 
 
 if __name__ == "__main__":

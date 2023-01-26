@@ -34,6 +34,7 @@ from .evaluation import EvalResults
 from .evaluation import EvalTask
 from .evaluation import eval_batches
 from .evaluation import eval_datasets
+from .evaluation import SampledSet
 
 from .pmap_util import ArgType
 from .pmap_util import wrapped_pmap
