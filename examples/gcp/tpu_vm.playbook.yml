@@ -1,17 +1,19 @@
 # Run this as:
 # ansible-playbook ./examples/gcp/tpu_vm.playbook.yml \
 #   "zone=us-central1-c project=some_project node_name=bobbin-tpu"
-- name: Setup TPU host(s)
+# The current configuration doesn't support multi-host configuration,
+# i.e. TPU accelerator_type has to be set as "v*-8".
+- name: Creating TPU host(s)
   hosts: localhost
   gather_facts: false
   vars:
     zone: CONFIG_NOT_PROVIDED
     project: CONFIG_NOT_PROVIDED
     node_name: CONFIG_NOT_PROVIDED
-    accelerator_type: v2-8
+    accelerator_type: v3-8
     vm_version: tpu-vm-base
   tasks:
-    - name: Create TPU node
+    - name: Creating TPU node
       ansible.builtin.shell:
         cmd: |
           NUM_VMS=$(gcloud compute tpus tpu-vm list --zone {{ vars.zone }} \
@@ -19,7 +21,7 @@
           if [[ 0 -eq "${NUM_VMS}" ]]; then
             gcloud compute tpus tpu-vm create {{ vars.node_name }} --zone {{ vars.zone }} \
               --project {{ vars.project }} --accelerator-type {{ vars.accelerator_type }} \
-              --version {{ vars.vm_version }}
+              --version {{ vars.vm_version }} || exit 1
             echo "CREATED"
           else
             echo "ALREADY_CREATED"
@@ -34,16 +36,20 @@
           echo ${HOST}
       changed_when: "'ALREADY_CREATED' not in create_tpu_result.stdout"
       register: create_tpu_result
-    - name: Set SSH options
+    - name: Setting SSH options
       ansible.builtin.set_fact:
         tpu_ssh_common_args: "{{ create_tpu_result.stdout_lines[1] }}"
         tpu_ssh_user: "{{ create_tpu_result.stdout_lines[2] }}"
         tpm_vm_name: "{{ node_name }}"
-    - name: Set SSH host IP address
+    - name: Setting SSH host IP address
       ansible.builtin.add_host:
         name: "{{ create_tpu_result.stdout_lines[3] }}"
         group: tpus
-- name: Setup TPU Host
+    - name: Waiting for SSH connection
+      ansible.builtin.wait_for:
+        host: "{{ create_tpu_result.stdout_lines[3] }}"
+        port: 22
+- name: Setting up TPU Host
   hosts: tpus
   vars:
     zone: CONFIG_NOT_PROVIDED
@@ -52,51 +58,50 @@
     ansible_ssh_common_args: "{{ hostvars.localhost.tpu_ssh_common_args }}"
     ansible_ssh_user: "{{ hostvars.localhost.tpu_ssh_user }}"
     bobbin_root: "{{ ansible_facts.env.PWD }}/bobbin"
+    gcloud_credential_file: "{{ lookup('env', 'HOME') }}/.config/gcloud/application_default_credentials.json"
   tasks:
-    - name: Install jax
+    - name: Creating credential directory
+      ansible.builtin.file:
+        path: "{{ ansible_facts.env.HOME }}/.config/gcloud/"
+        state: directory
+        mode: '0750'
+    - name: Copying credential
+      ansible.builtin.copy:
+        src: "{{ gcloud_credential_file }}"
+        dest: "{{ ansible_facts.env.HOME }}/.config/gcloud/application_default_credentials.json"
+        mode: '0600'
+      become: true
+    - name: Installing jax
       ansible.builtin.pip:
         name: "jax[tpu]"
         extra_args: "--find-links=https://storage.googleapis.com/jax-releases/libtpu_releases.html"
       become: true
-    - name: Synchronize bobbin dir
+    - name: Synchronizing bobbin dir
       ansible.posix.synchronize:
         src: "{{ playbook_dir }}/../.."
         dest: "{{ bobbin_root }}"
         use_ssh_args: true
         rsync_opts:
+          - "--exclude=devenv"
           - "--exclude=.*"
           - "--exclude=*.pyc"
           - "--exclude=__pycache*"
           - "--exclude=build"
           - "--exclude=*.egg-info"
       # noqa args  # `use_ssh_args` is relatively new and ansible-lint may not support.
-    - name: Install bobbin prerequiments
+    - name: Installing bobbin prerequiments
       ansible.builtin.pip:
         requirements: "{{ bobbin_root }}/requirements/requirements.txt"
       become: true
-    - name: Install bobbin
+    - name: Installing bobbin
       ansible.builtin.pip:
         chdir: "{{ bobbin_root }}"
         name: "."
         state: "forcereinstall"
-    - name: Install utilities for example trainers
+    - name: Installing utilities for example trainers
       ansible.builtin.pip:
         name:
           - "tensorboard"
           - "tensorflow-io"
           - "tensorflow_datasets"
       become: true
-    - name: Give final notes
-      ansible.builtin.debug:
-        msg: |
-          Now, you can run arbitrary scripts, e.g., as follows.
-          ```
-          gcloud compute tpus tpu-vm ssh {{ node_name }} \
-            --zone {{ zone }} --project {{ project }} \
-            python3 {{ bobbin_root }}/example/mnist.py [args]
-          ```
-
-          Don't forget to delete TPU-VM when you are done :)
-          ```
-          gcloud compute tpus tpu-vm delete {{ node_name }} --zone {{ zone }} --project {{ project }}
-          ```
