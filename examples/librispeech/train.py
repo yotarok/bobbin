@@ -605,6 +605,7 @@ def main(args: argparse.Namespace):
         step=init_train_state.step,
     )
 
+    logging.info("\n%s", bobbin.summarize_shape(init_train_state.params))
     logging.info("MAIN LOOP STARTS with devices %s", str(jax.local_devices()))
     for batch in train_ds.as_numpy_iterator():
         train_state, step_info = train_step_fn(train_state, batch, next(prng_keys))
