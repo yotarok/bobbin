@@ -502,7 +502,6 @@ def fill_default_arguments(args: argparse.Namespace):
 def main(args: argparse.Namespace):
     fill_default_arguments(args)
 
-    prng_keys = bobbin.prng_keygen(jax.random.PRNGKey(0))
     train_ds, eval_dss = prepare_datasets(
         tfds_data_dir=args.tfds_data_dir,
         wpm_vocab_path=args.wpm_vocab,
@@ -517,10 +516,11 @@ def main(args: argparse.Namespace):
 
     wpm_vocab = asrio.WpmVocab.load(args.wpm_vocab, size_limit=args.wpm_size_limit)
     wpm_size = len(wpm_vocab.id2str)
+
     batch_size, *speech_shape = train_ds.element_spec["speech"].shape
     init_inputs = (
-        np.zeros((1, *speech_shape), dtype=np.int16),
-        np.ones((1, speech_shape[0]), dtype=np.float32),
+        jnp.zeros((1, *speech_shape), dtype=np.int16),
+        jnp.ones((1, speech_shape[0]), dtype=np.float32),
     )
     normalizer = None
     if args.feature_normalizer is not None:
@@ -528,6 +528,8 @@ def main(args: argparse.Namespace):
             open(args.feature_normalizer).read(), asrio.MeanVarNormalizer.empty()
         )
     model = CtcAsrModel(num_outputs=wpm_size, feature_normalizer=normalizer)
+
+    prng_keys = bobbin.prng_keygen(jax.random.PRNGKey(0))
     init_model_vars = jax.jit(model.init)(
         {
             "dropout": next(prng_keys),
@@ -544,7 +546,6 @@ def main(args: argparse.Namespace):
     train_state = bobbin.initialize_train_state(
         model.apply, init_model_vars, tx, checkpoint_path=all_checkpoint_path
     )
-    init_train_state = train_state
     train_state = flax.jax_utils.replicate(train_state, jax.local_devices())
     train_step_fn = bobbin.pmap_for_train_step(
         jax.jit(
@@ -554,6 +555,7 @@ def main(args: argparse.Namespace):
     )
 
     train_writer = flax_tb.SummaryWriter(tensorboard_path / "train")
+    bobbin.publish_trainer_env_info(train_writer, train_state)
 
     eval_freq = num_train_samples // batch_size
     warmup = 10
@@ -575,16 +577,7 @@ def main(args: argparse.Namespace):
     )
     crontab.schedule(bobbin.PublishTrainingProgress(train_writer), step_interval=100)
 
-    logging.info(
-        "Total #Params = %d", bobbin.total_dimensionality(init_train_state.params)
-    )
-    train_writer.text(
-        "trainer/log/total_num_params",
-        f"Number of parameters: {bobbin.total_dimensionality(init_train_state.params)}",
-        step=init_train_state.step,
-    )
-
-    logging.info("\n%s", bobbin.summarize_shape(init_train_state.params))
+    bobbin.publish_trainer_env_info(train_writer, train_state)
     logging.info("MAIN LOOP STARTS with devices %s", str(jax.local_devices()))
     for batch in train_ds.as_numpy_iterator():
         train_state, step_info = train_step_fn(train_state, batch, next(prng_keys))

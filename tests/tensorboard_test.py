@@ -95,7 +95,6 @@ _SummaryWriterOriginal = flax_tb.SummaryWriter
 def _create_mock_writer(dest_path, **kwargs):
     ret = mock.create_autospec(_SummaryWriterOriginal)
     ret.dest_path = dest_path
-    print(ret)
     return ret
 
 
@@ -166,6 +165,41 @@ class EvalResultsPublisherTest(chex.TestCase):
             for call in custom_write_to_tensorboard.call_args_list
         ]
         self.assertSequenceEqual(sorted(called_datasets), sorted(["devset", "evalset"]))
+
+
+@mock.patch("logging.log")
+class TrainerEnvPublisherTest(chex.TestCase):
+    def test_publish(self, mock_log):
+        writer = mock.create_autospec(flax_tb.SummaryWriter)
+        params = dict(w=np.zeros((7, 7)), b=np.zeros((7,)))
+        extra_vars = dict(
+            non_trainable=dict(
+                ema_w=np.zeros((7, 7)),
+                ema_b=np.zeros((7,)),
+            )
+        )
+        state = bobbin.TrainState.create(
+            apply_fn=None, params=params, tx=optax.identity(), extra_vars=extra_vars
+        )
+        tensorboard.publish_trainer_env_info(writer, state, prefix="")
+
+        texts = dict()
+        for call in writer.text.call_args_list:
+            tag, s, step = call.args
+            np.testing.assert_equal(step, 0)
+            texts[tag] = s
+
+        np.testing.assert_(
+            str(bobbin.total_dimensionality(params)) in texts["total_num_params"]
+        )
+        np.testing.assert_(bobbin.summarize_shape(params) in texts["param_shape"])
+
+        all_log_text = ""
+        for call in mock_log.call_args_list:
+            unused_loglevel, s, *format_args = call.args
+            s = s % tuple(format_args)
+            all_log_text += s + "\n"
+        np.testing.assert_(bobbin.summarize_shape(params) in all_log_text)
 
 
 if __name__ == "__main__":

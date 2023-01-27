@@ -53,6 +53,8 @@ from .pytypes import VarCollection
 from .tensorboard import make_eval_results_writer
 from .tensorboard import ImageSow
 from .tensorboard import MplImageSow
+from .tensorboard import publish_train_intermediates
+from .tensorboard import publish_trainer_env_info
 from .tensorboard import ScalarSow
 
 from .training import initialize_train_state
