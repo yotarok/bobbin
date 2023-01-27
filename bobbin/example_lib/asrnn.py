@@ -175,7 +175,7 @@ class CnnEncoder(nn.Module):
         (2, 2),
         (2, 2),
     )
-    use_bias: bool = False
+    use_bias: bool = True
     num_outputs: int = 256
     use_batch_norm: bool = False
     is_eval: Optional[bool] = None
