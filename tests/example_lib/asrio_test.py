@@ -169,5 +169,45 @@ class MeanVarNormalizerTest(chex.TestCase):
         np.testing.assert_allclose(results, inputs)
 
 
+def _padded_batch_from_token_lists(data, *, max_length):
+    batch_size = len(data)
+    padded_batch = np.zeros((batch_size, max_length), dtype=np.int32)
+    paddings = np.ones((batch_size, max_length))
+
+    for i, line in enumerate(data):
+        padded_batch[i, : len(line)] = line
+        paddings[i, : len(line)] = 0.0
+
+    return padded_batch, paddings
+
+
+class PaddedSequenceUtilTest(chex.TestCase):
+    def test_recovering_from_padded_batch(self):
+        data = [
+            [1, 2, 3],
+            [4, 5, 6, 7, 8],
+        ]
+        padded_batch, paddings = _padded_batch_from_token_lists(data, max_length=8)
+
+        result = asrio.make_list_from_padded_batch(padded_batch, paddings)
+
+        for actual, expected in zip(result, data):
+            np.testing.assert_equal(actual, expected)
+
+    def test_ctc_blank_removal(self):
+        data = [
+            [1, 1, 0, 2, 2, 3, 3, 3],
+            [4, 4, 4, 5, 5, 5],
+            [4, 0, 4, 5, 5, 0],
+        ]
+        expected_all = [[1, 2, 3], [4, 5], [4, 4, 5]]
+
+        padded_batch, paddings = _padded_batch_from_token_lists(data, max_length=8)
+        results = asrio.remove_ctc_blanks_and_repeats(padded_batch, paddings)
+
+        for actual, expected in zip(results, expected_all):
+            np.testing.assert_equal(actual, expected)
+
+
 if __name__ == "__main__":
     absltest.main()

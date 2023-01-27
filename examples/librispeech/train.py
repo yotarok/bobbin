@@ -25,7 +25,7 @@ import logging
 import sys
 import tempfile
 import time
-from typing import Dict, List, Optional, Sequence, Tuple
+from typing import Dict, Optional, Sequence, Tuple
 import urllib.request
 
 import chex
@@ -396,28 +396,6 @@ class EvalResults(bobbin.EvalResults):
             )
 
 
-def _recover_padded_tokens(
-    token_ids: np.ndarray, paddings: np.ndarray
-) -> List[List[int]]:
-    token_ids = np.asarray(token_ids).tolist()
-    return [
-        [lab for pad, lab in zip(pads, padded_ids) if pad < 0.5]
-        for padded_ids, pads in zip(token_ids, paddings)
-    ]
-
-
-def _resolve_ctc_repetition(
-    token_ids: Sequence[int], *, blank_id: int = 0
-) -> Sequence[int]:
-    prev = None
-    unduped = []
-    for tok in token_ids:
-        if tok != prev:
-            unduped.append(tok)
-        prev = tok
-    return [tok for tok in unduped if tok != blank_id]
-
-
 class EvalTask(bobbin.EvalTask):
     def __init__(self, model: nn.Module, wpm_vocab: asrio.WpmVocab):
         self.model = model
@@ -449,8 +427,10 @@ class EvalTask(bobbin.EvalTask):
         sampled_results = bobbin.SampledSet(max_size=3)
 
         results = EvalResults()
-        batched_hyp_ids = _recover_padded_tokens(predicts, predict_paddings)
-        batched_ref_ids = _recover_padded_tokens(
+        batched_hyp_ids = asrio.remove_ctc_blanks_and_repeats(
+            predicts, predict_paddings
+        )
+        batched_ref_ids = asrio.make_list_from_padded_batch(
             batch["tokens"], batch["token_paddings"]
         )
 
@@ -459,7 +439,6 @@ class EvalTask(bobbin.EvalTask):
         acc_char_error = results.char_error
         sent_err = 0
         for hyp_ids, ref_ids in zip(batched_hyp_ids, batched_ref_ids):
-            hyp_ids = _resolve_ctc_repetition(hyp_ids)
             acc_token_error = acc_token_error.accumulate(hyp_ids, ref_ids)
             hyp_text = (
                 "".join(self.wpm_vocab.id2str.get(i, "█") for i in hyp_ids)

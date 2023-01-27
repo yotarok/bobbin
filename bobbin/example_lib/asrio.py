@@ -391,3 +391,55 @@ class MeanVarNormalizer:
     @classmethod
     def empty(cls) -> MeanVarNormalizer:
         return cls(mean=np.zeros(1), stddev=np.zeros(1), n=0)
+
+
+def make_list_from_padded_batch(
+    data: np.ndarray, paddings: np.ndarray
+) -> List[List[Any]]:
+    """Recovers variable-length lists from the padded-batch.
+
+    Args:
+      data: An array with `(batch_size, max_length, ...)`-shape.
+      paddings: Padding indicators stored in `(batch_size, max_length)`-shaped
+        array.  `paddings[i, t] > 0.5` denotes that `t`-th element in `i`-th
+        sequence is a padding.
+
+    Returns:
+      List of list with the length of `batch_size`.
+    """
+    return [
+        [elem for pad, elem in zip(pads, row) if pad < 0.5]
+        for row, pads in zip(data, paddings)
+    ]
+
+
+def remove_ctc_blanks_and_repeats(
+    token_ids: chex.Array,
+    token_paddings: chex.Array,
+    *,
+    blank_id: int = 0,
+    use_jnp=False,
+) -> Sequence[int]:
+    """Applies the CTC blank removal rule.
+
+    Args:
+      token_ids: Integer array with `(batch_size, max_length)`-shape.
+      token_paddings: Padding indicators for `token_ids`.
+      blank_id: ID for blank tokens.
+
+    Returns:
+      List (with length=`batch_size`) of variable-length lists containing
+      tokens after CTC blank removal.
+    """
+
+    npmod = jnp if use_jnp else np
+
+    batch_size, max_length = token_ids.shape
+    is_repetition = npmod.concatenate(
+        [npmod.zeros((batch_size, 1)), token_ids[:, 1:] == token_ids[:, :-1]], axis=1
+    )
+    is_blank = token_ids == blank_id
+    remove_mask = npmod.logical_or(is_repetition, is_blank)
+
+    updated_paddings = jnp.where(remove_mask, 1.0, token_paddings)
+    return make_list_from_padded_batch(token_ids, updated_paddings)
