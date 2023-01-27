@@ -282,6 +282,8 @@ def main(args: argparse.Namespace):
         f"Number of parameters: {bobbin.total_dimensionality(init_train_state.params)}",
         step=init_train_state.step,
     )
+    bobbin.publish_trainer_env_info(train_writer, init_train_state)
+
     warmup = 5
     crontab = bobbin.CronTab()
     crontab.schedule(
