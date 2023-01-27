@@ -148,3 +148,31 @@ def total_dimensionality(tree: chex.ArrayTree) -> int:
     return jax.tree_util.tree_reduce(
         lambda n, arr: n + np.product(np.asarray(arr).shape), tree, 0
     )
+
+
+def summarize_shape(tree: chex.ArrayTree) -> str:
+    """Returns a string that summarizes shapes and dtypes of the tree."""
+    indent_width = 2
+
+    def metadata_to_str(x: chex.Array):
+        return f"{str(x.shape)} dtype={str(x.dtype)}"
+
+    def visit_node(subtree, indent_level: int):
+        ret = ""
+        for k, v in subtree.items():
+            ret += " " * (indent_width * indent_level)
+            ret += k + ":"
+            if hasattr(v, "shape") and hasattr(v, "dtype"):
+                ret += " " + metadata_to_str(v) + "\n"
+            else:
+                ret += "\n"
+                ret += visit_node(v, indent_level + 1)
+        return ret
+
+    if isinstance(tree, chex.Array):
+        return metadata_to_str(tree)
+
+    # normalize
+    tree = jax.tree_util.tree_map(np.asarray, tree)
+    state_dict = flax.serialization.to_state_dict(tree)
+    return visit_node(state_dict, 0)
