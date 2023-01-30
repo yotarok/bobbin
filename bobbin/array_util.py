@@ -63,3 +63,11 @@ def split_leading_axis(
         return x.reshape((n, lead_dim // n) + tuple(rest_dims))
 
     return jax.tree_util.tree_map(split, tree)
+
+
+def flatten_leading_axes(
+    tree: chex.ArrayTree, num_leading_axes: int = 2
+) -> chex.ArrayTree:
+    return jax.tree_util.tree_map(
+        lambda x: x.reshape((-1,) + x.shape[num_leading_axes:]), tree
+    )

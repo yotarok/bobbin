@@ -18,6 +18,7 @@
 # flake8: noqa: F401
 
 from .array_util import split_leading_axis
+from .array_util import flatten_leading_axes
 
 from .cron import AtFirstNSteps
 from .cron import AtNthStep
