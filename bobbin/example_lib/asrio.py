@@ -407,6 +407,8 @@ def make_list_from_padded_batch(
     Returns:
       List of list with the length of `batch_size`.
     """
+    data = data.tolist()
+    paddings = paddings.tolist()
     return [
         [elem for pad, elem in zip(pads, row) if pad < 0.5]
         for row, pads in zip(data, paddings)
@@ -418,7 +420,7 @@ def remove_ctc_blanks_and_repeats(
     token_paddings: chex.Array,
     *,
     blank_id: int = 0,
-    use_jnp=False,
+    use_jnp: bool = False,
 ) -> Sequence[int]:
     """Applies the CTC blank removal rule.
 
@@ -441,5 +443,5 @@ def remove_ctc_blanks_and_repeats(
     is_blank = token_ids == blank_id
     remove_mask = npmod.logical_or(is_repetition, is_blank)
 
-    updated_paddings = jnp.where(remove_mask, 1.0, token_paddings)
+    updated_paddings = npmod.where(remove_mask, 1.0, token_paddings)
     return make_list_from_padded_batch(token_ids, updated_paddings)
