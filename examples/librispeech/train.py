@@ -25,7 +25,7 @@ import logging
 import sys
 import tempfile
 import time
-from typing import Dict, Optional, Sequence, Tuple
+from typing import Any, Dict, Iterable, Optional, Sequence, Tuple
 import urllib.request
 
 import chex
@@ -64,6 +64,24 @@ def tokenize_dataset(wpm_vocab: asrio.WpmVocab, ds: tf.data.Dataset) -> tf.data.
 
     ds = ds.map(tf_tokenizer, num_parallel_calls=tf.data.AUTOTUNE)
     return ds
+
+
+def pad_smaller_batch(
+    ds: tf.data.Dataset,
+    batch_size: int,
+    padded_shapes: Dict[str, Sequence[int]],
+    padding_values: Dict[str, Any],
+) -> tf.data.Dataset:
+    # pad partial batch at the last
+    ds = ds.padded_batch(
+        1,
+        padded_shapes={k: [batch_size] + v for k, v in padded_shapes.items()},
+        padding_values=padding_values,
+    )
+    return ds.map(
+        lambda row: {k: v[0] for k, v in row.items()},
+        num_parallel_calls=tf.data.AUTOTUNE,
+    )
 
 
 def batch_dataset(
@@ -105,12 +123,15 @@ def batch_dataset(
     ds = ds.map(remove_unknown_fields, num_parallel_calls=tf.data.AUTOTUNE)
     if is_train:
         ds = ds.filter(filter_oversized_samples)
-    return ds.padded_batch(
+    ds = ds.padded_batch(
         batch_size,
         padded_shapes=padded_shapes,
         padding_values=padding_values,
         drop_remainder=is_train,
     )
+    if not is_train:
+        ds = pad_smaller_batch(ds, batch_size, padded_shapes, padding_values)
+    return ds
 
 
 def prepare_datasets(
@@ -132,10 +153,13 @@ def prepare_datasets(
     eval_dataset_names = ("dev", "test_clean", "test_other")
     eval_datasets = tfds.load(
         "librispeech",
-        split=(
-            "dev_clean+dev_other",
-            "test_clean",
-            "test_other",
+        split=tuple(
+            tfds.split_for_jax_process(s)
+            for s in (
+                "dev_clean+dev_other",
+                "test_clean",
+                "test_other",
+            )
         ),
         data_dir=tfds_data_dir,
         builder_kwargs=builder_kwargs,
@@ -147,8 +171,9 @@ def prepare_datasets(
         tokenize_dataset(wpm_vocab, ds) for ds in (train_dataset, *eval_datasets)
     ]
 
-    train_dataset = train_dataset.repeat().shuffle(buffer_size=1024)
-
+    train_dataset = train_dataset.repeat().shuffle(
+        buffer_size=1024, seed=jax.process_index()
+    )
     train_dataset = batch_dataset(
         train_dataset, batch_size=train_batch_size, is_train=True
     )
@@ -290,10 +315,9 @@ class EvalResults(bobbin.EvalResults):
     num_sentence_errors: int = 0
     start_time: Optional[float] = None
     end_time: Optional[float] = None
-    sampled_results: bobbin.SampledSet[Tuple[str, str]] = bobbin.SampledSet(max_size=3)
-
-    num_result_samples: int = 3
-    sampled_hyps: Sequence[tuple[str, str, float]] = ()
+    sampled_results: bobbin.SampledSet[Tuple[str, str]] = struct.field(
+        pytree_node=False, default=bobbin.SampledSet(max_size=3)
+    )
 
     _sum_fields: Sequence[str] = struct.field(
         pytree_node=False,
@@ -334,7 +358,8 @@ class EvalResults(bobbin.EvalResults):
             + _error_to_log_message(self.char_error)
             + "\n Word: "
             + _error_to_log_message(self.word_error)
-            + f"\nSent.: ER= {self.sentence_error_rate * 100}%"
+            + f"\nSent.: ER={self.sentence_error_rate * 100}%"
+            + f", N={self.num_sentences}"
             + f" ({self.sentences_per_second} sentences/sec)\n"
             + sample_summary
         )
@@ -349,7 +374,6 @@ class EvalResults(bobbin.EvalResults):
         kwargs.update(
             start_time=self.start_time,
             end_time=self.end_time,
-            num_result_samples=self.num_result_samples,
             sampled_results=self.sampled_results,
         )
         return EvalResults(**kwargs)
@@ -371,7 +395,17 @@ class EvalResults(bobbin.EvalResults):
             end_time = max(self.end_time, other.end_time)
         kwargs.update(start_time=start_time, end_time=end_time)
 
-        kwargs.update(sampled_results=self.sampled_results.union(other.sampled_results))
+        # TODO: This is not clean, but `gather_from_jax_processes` used in
+        # `evaluate_batches` returns copy of the original fields for
+        # non-pytree fields, and those copies dominates all N sampled
+        # hypotheses. So, here, it takes union only if `other.sampled_results`
+        # are not copies.
+        sampled_results = (
+            self.sampled_results.union(other.sampled_results)
+            if self.sampled_results != other.sampled_results
+            else self.sampled_results
+        )
+        kwargs.update(sampled_results=sampled_results)
         return EvalResults(**kwargs)
 
     def is_better_than(self, other: EvalResults) -> bool:
@@ -396,6 +430,19 @@ class EvalResults(bobbin.EvalResults):
             )
 
 
+def _detokenize(
+    wpm_vocab: asrio.WpmVocab,
+    ids: Iterable[int],
+    unk_text: str = "█",
+    word_boundary_text: str = "▁",
+) -> str:
+    return (
+        "".join(wpm_vocab.id2str.get(i, unk_text) for i in ids)
+        .replace(word_boundary_text, " ")
+        .strip()
+    )
+
+
 class EvalTask(bobbin.EvalTask):
     def __init__(self, model: nn.Module, wpm_vocab: asrio.WpmVocab):
         self.model = model
@@ -417,45 +464,31 @@ class EvalTask(bobbin.EvalTask):
         predicts = logits.argmax(axis=-1)
         return predicts, logit_paddings
 
-    def evaluate(self, batch: _Batch, model_vars: _VarCollection) -> EvalResults:
-        predicts, predict_paddings = self.predict(batch, model_vars)
-
-        # It's important to ensure both are NumPy-array (and on CPU)
-        predicts = np.asarray(predicts)
-        predict_paddings = np.asarray(predict_paddings)
-
-        sampled_results = bobbin.SampledSet(max_size=3)
-
+    def _build_results(
+        self,
+        batched_hyp_ids: Iterable[Sequence[int]],
+        batched_ref_ids: Iterable[Sequence[int]],
+    ) -> EvalResults:
         results = EvalResults()
-        batched_hyp_ids = asrio.remove_ctc_blanks_and_repeats(
-            predicts, predict_paddings
-        )
-        batched_ref_ids = asrio.make_list_from_padded_batch(
-            batch["tokens"], batch["token_paddings"]
-        )
-
         acc_token_error = results.token_error
         acc_word_error = results.word_error
         acc_char_error = results.char_error
         sent_err = 0
+        num_sentences = 0
+        sampled_results = bobbin.SampledSet(max_size=3)
         for hyp_ids, ref_ids in zip(batched_hyp_ids, batched_ref_ids):
+            if not ref_ids:
+                continue  # all-pad sequences are treated as invalid sequence.
             acc_token_error = acc_token_error.accumulate(hyp_ids, ref_ids)
-            hyp_text = (
-                "".join(self.wpm_vocab.id2str.get(i, "█") for i in hyp_ids)
-                .replace("▁", " ")
-                .strip()
-            )
-            ref_text = (
-                "".join(self.wpm_vocab.id2str.get(i, "█") for i in ref_ids)
-                .replace("▁", " ")
-                .strip()
-            )
+            hyp_text = _detokenize(self.wpm_vocab, hyp_ids)
+            ref_text = _detokenize(self.wpm_vocab, ref_ids)
             acc_word_error = acc_word_error.accumulate(
                 hyp_text.split(" "), ref_text.split(" ")
             )
             acc_char_error = acc_char_error.accumulate(list(hyp_text), list(ref_text))
             if hyp_text != ref_text:
                 sent_err += 1
+            num_sentences += 1
 
             sampled_results = sampled_results.add((hyp_text, ref_text))
 
@@ -464,10 +497,41 @@ class EvalTask(bobbin.EvalTask):
             token_error=acc_token_error,
             word_error=acc_word_error,
             char_error=acc_char_error,
-            num_sentences=results.num_sentences + len(batched_hyp_ids),
+            num_sentences=results.num_sentences + num_sentences,
             num_sentence_errors=results.num_sentence_errors + sent_err,
             sampled_results=sampled_results,
         )
+
+    @functools.partial(
+        bobbin.wrapped_pmap,
+        axis_name="batch",
+        argtypes=["static", "shard", "broadcast"],
+        donate_argnums=(1,),
+    )
+    def parallel_predict(self, b, mvar):
+        return self.predict(b, mvar)
+
+    def evaluate(self, batch: _Batch, model_vars: _VarCollection) -> EvalResults:
+        if batch is None:
+            # This is only allowed when we are sure that there's no parallel
+            # reduction (e.g. `jax.lax.p*` functions) used in `parallel_predict`.
+            # Otherwise, all reduction operators must be called in the same
+            # order in each process. Usually this is done by feeding a dummy
+            # batch.
+            return EvalResults()
+        results = self.parallel_predict(batch, model_vars)
+        # It's important to ensure both are NumPy-array (and on CPU)
+        results = jax.tree_util.tree_map(np.asarray, results)
+        predicts, predict_paddings = bobbin.flatten_leading_axes(results)
+
+        batched_hyp_ids = asrio.remove_ctc_blanks_and_repeats(
+            predicts, predict_paddings
+        )
+        batched_ref_ids = asrio.make_list_from_padded_batch(
+            np.asarray(batch["tokens"]), np.asarray(batch["token_paddings"])
+        )
+        results = self._build_results(batched_hyp_ids, batched_ref_ids)
+        return results
 
 
 def make_schedule(
@@ -502,11 +566,17 @@ def fill_default_arguments(args: argparse.Namespace):
 def main(args: argparse.Namespace):
     fill_default_arguments(args)
 
+    jax.distributed.initialize()
+    if jax.process_index() == 0:
+        logging.basicConfig(stream=sys.stderr)
+        logging.root.setLevel(logging.INFO)
+
     train_ds, eval_dss = prepare_datasets(
         tfds_data_dir=args.tfds_data_dir,
         wpm_vocab_path=args.wpm_vocab,
         wpm_size_limit=args.wpm_size_limit,
         train_batch_size=args.per_device_batch_size * jax.local_device_count(),
+        eval_batch_size=args.per_device_batch_size * jax.local_device_count(),
     )
     num_train_samples = 28_539 + 104_014 + 148_688
 
@@ -518,6 +588,7 @@ def main(args: argparse.Namespace):
     wpm_size = len(wpm_vocab.id2str)
 
     batch_size, *speech_shape = train_ds.element_spec["speech"].shape
+    global_batch_size = batch_size * jax.process_count()
     init_inputs = (
         jnp.zeros((1, *speech_shape), dtype=np.int16),
         jnp.ones((1, speech_shape[0]), dtype=np.float32),
@@ -529,6 +600,7 @@ def main(args: argparse.Namespace):
         )
     model = CtcAsrModel(num_outputs=wpm_size, feature_normalizer=normalizer)
 
+    # init must be deterministic for multi-host training
     prng_keys = bobbin.prng_keygen(jax.random.PRNGKey(0))
     init_model_vars = jax.jit(model.init)(
         {
@@ -554,10 +626,15 @@ def main(args: argparse.Namespace):
         )
     )
 
-    train_writer = flax_tb.SummaryWriter(tensorboard_path / "train")
+    train_writer = (
+        flax_tb.SummaryWriter(tensorboard_path / "train")
+        if jax.process_index() == 0
+        else bobbin.NullSummaryWriter()
+    )
     bobbin.publish_trainer_env_info(train_writer, train_state)
 
-    eval_freq = num_train_samples // batch_size
+    # Seeting up crontab (auxiliary actions periodically executed during the training)
+    eval_freq = num_train_samples // global_batch_size
     warmup = 10
     crontab = bobbin.CronTab()
     crontab.schedule(
@@ -569,13 +646,18 @@ def main(args: argparse.Namespace):
         ),
         step_interval=eval_freq,
     )
-    crontab.schedule(
-        bobbin.SaveCheckpoint(all_checkpoint_path), step_interval=1000, at_step=warmup
-    )
-    crontab.schedule(
-        bobbin.WriteLog(), time_interval=30.0, at_first_steps_of_process=warmup
-    )
-    crontab.schedule(bobbin.PublishTrainingProgress(train_writer), step_interval=100)
+    if jax.process_index() == 0:
+        crontab.schedule(
+            bobbin.SaveCheckpoint(all_checkpoint_path),
+            step_interval=1000,
+            at_step=warmup,
+        )
+        crontab.schedule(
+            bobbin.WriteLog(), time_interval=30.0, at_first_steps_of_process=warmup
+        )
+        crontab.schedule(
+            bobbin.PublishTrainingProgress(train_writer), step_interval=100
+        )
 
     bobbin.publish_trainer_env_info(train_writer, train_state)
     logging.info("MAIN LOOP STARTS with devices %s", str(jax.local_devices()))
@@ -593,9 +675,6 @@ def main(args: argparse.Namespace):
 
 
 if __name__ == "__main__":
-    logging.basicConfig(stream=sys.stderr)
-    logging.root.setLevel(logging.INFO)
-
     # Disable TF's memory preallocation if TF is built with CUDA.
     tf.config.experimental.set_visible_devices([], "GPU")
 
