@@ -14,7 +14,10 @@
 
 """Tests for pmap_util."""
 
+import unittest
+
 from absl.testing import absltest
+from absl.testing import parameterized
 import chex
 import jax
 import jax.numpy as jnp
@@ -87,6 +90,54 @@ class WrappedPmapTest(chex.TestCase):
                 sq_dist = np.sum((randoms[i] - randoms[j]) ** 2)
                 # TODO: Give some analysis on the comment
                 self.assertGreater(sq_dist, 1.0)
+
+
+class ProcessGatherTest(chex.TestCase):
+    @parameterized.product(
+        process_count=[7],
+        process_index=[0, 3],
+    )
+    @unittest.mock.patch("jax.lax.all_gather")
+    @unittest.mock.patch("jax.process_index")
+    @unittest.mock.patch("jax.process_count")
+    def test_gather(
+        self,
+        mock_process_count,
+        mock_process_index,
+        mock_all_gather,
+        process_count,
+        process_index,
+    ):
+        mock_process_count.return_value = process_count
+        mock_process_index.return_value = process_index
+
+        all_data = [n for n in range(process_count)]
+
+        def all_gather_impl(
+            unused_tree: chex.ArrayTree, axis_name: str
+        ) -> chex.ArrayTree:
+            del axis_name
+            # this part is depending on internal behavior of
+            # `gather_from_jax_processes` and need to be updated when the
+            # internal behavior updated.
+            ret_process_ids = []
+            ret_device_ids = []
+            ret_data = []
+            for process_id in range(process_count):
+                for device_id in range(jax.local_device_count()):
+                    ret_process_ids.append(process_id)
+                    ret_device_ids.append(device_id)
+                    ret_data.append(all_data[process_id])
+            return (
+                jnp.asarray(ret_process_ids),
+                jnp.asarray(ret_device_ids),
+                jnp.asarray(ret_data),
+            )
+
+        mock_all_gather.side_effect = all_gather_impl
+        with chex.fake_pmap():
+            results = pmap_util.gather_from_jax_processes(all_data[process_index])
+        np.testing.assert_array_equal(results, all_data)
 
 
 if __name__ == "__main__":

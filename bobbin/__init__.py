@@ -37,13 +37,14 @@ from .evaluation import eval_datasets
 from .evaluation import SampledSet
 
 from .pmap_util import ArgType
-from .pmap_util import wrapped_pmap
 from .pmap_util import BroadcastArg
+from .pmap_util import gather_from_jax_processes
 from .pmap_util import RngArg
 from .pmap_util import ShardArg
 from .pmap_util import StaticArg
 from .pmap_util import ThruArg
 from .pmap_util import unshard
+from .pmap_util import wrapped_pmap
 
 from .pytypes import Batch
 from .pytypes import BatchGen

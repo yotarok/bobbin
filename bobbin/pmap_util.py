@@ -18,6 +18,7 @@ from typing import Any, Callable, List, Mapping, Optional, Sequence, Union
 import chex
 import flax
 import jax
+import numpy as np
 
 from .pytypes import Backend
 from .pytypes import Device
@@ -196,3 +197,29 @@ def unshard(tree: _ArrayTree) -> List[_ArrayTree]:
         raise ValueError("Tree to be unsharded do not have a leading axis.")
     size = leaves[0].shape[0]
     return [jax.tree_util.tree_map(lambda x: x[i], tree) for i in range(size)]
+
+
+def gather_from_jax_processes(v: _ArrayTree) -> List[_ArrayTree]:
+    """Gathers arbitrary trees from distributed processes."""
+    repl_v = flax.jax_utils.replicate(v)  # repl_v has [local_dev,] leading axis
+
+    # From the observation, `all_gather` always arranges the gathered data in
+    # process-major (and device-minor) order. However, here we try not to
+    # depend on the undocumented behavior, so attach device id first to the
+    # data to be gathered.
+
+    device_ids = np.arange(jax.local_device_count())
+    process_ids = np.full((jax.local_device_count(),), jax.process_index())
+    repl_v = (process_ids, device_ids, repl_v)
+    collected = jax.pmap(lambda tree: jax.lax.all_gather(tree, "b"), "b")(repl_v)
+    # collected has [local_dev, all_dev] leading axes
+    collected = flax.jax_utils.unreplicate(collected)  # converted to [all_dev, ...]
+
+    # Now only the data from the first device is collected.
+    unset = object()
+    ret = [unset] * jax.process_count()
+    for proc_id, dev_id, tree in unshard(collected):
+        if dev_id == 0:
+            ret[proc_id] = tree
+    assert unset not in ret
+    return ret
