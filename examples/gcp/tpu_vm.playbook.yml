@@ -41,14 +41,24 @@
         tpu_ssh_common_args: "{{ create_tpu_result.stdout_lines[1] }}"
         tpu_ssh_user: "{{ create_tpu_result.stdout_lines[2] }}"
         tpm_vm_name: "{{ node_name }}"
+    - name: Collecting SSH endpoints
+      ansible.builtin.shell:
+        cmd: |
+          gcloud compute tpus tpu-vm describe bobbin-tpu \
+              --zone {{ vars.zone }} --project {{ vars.project }} \
+              --format json \
+              | jq '.networkEndpoints[].accessConfig.externalIp' -r
+      register: ssh_endpoint_results
     - name: Setting SSH host IP address
       ansible.builtin.add_host:
-        name: "{{ create_tpu_result.stdout_lines[3] }}"
+        name: "{{ item }}"
         group: tpus
+      loop: "{{ ssh_endpoint_results.stdout_lines }}"
     - name: Waiting for SSH connection
       ansible.builtin.wait_for:
-        host: "{{ create_tpu_result.stdout_lines[3] }}"
+        host: "{{ item }}"
         port: 22
+      loop: "{{ ssh_endpoint_results.stdout_lines }}"
 - name: Setting up TPU Host
   hosts: tpus
   vars:
@@ -70,7 +80,6 @@
         src: "{{ gcloud_credential_file }}"
         dest: "{{ ansible_facts.env.HOME }}/.config/gcloud/application_default_credentials.json"
         mode: '0600'
-      become: true
     - name: Installing jax
       ansible.builtin.pip:
         name: "jax[tpu]"
