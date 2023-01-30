@@ -41,6 +41,37 @@ _ArrayTree = chex.ArrayTree
 _TrainState = flax.training.train_state.TrainState
 
 
+class NullSummaryWriter:
+    """Null-object counterpart of `flax.metrics.tensorboard.SummaryWriter`."""
+
+    def close(self):
+        pass
+
+    def flush(self):
+        pass
+
+    def scalar(self, *args, **kwargs):
+        pass
+
+    def image(self, *args, **kwargs):
+        pass
+
+    def audio(self, *args, **kwargs):
+        pass
+
+    def histogram(self, *args, **kwargs):
+        pass
+
+    def text(self, *args, **kwargs):
+        pass
+
+    def write(self, *args, **kwargs):
+        pass
+
+    def hparams(self, *args, **kwargs):
+        pass
+
+
 class PublishableSow(metaclass=abc.ABCMeta):
     @abc.abstractmethod
     def publish(self, writer: flax_tb.SummaryWriter, tag: str, step: int) -> None:
@@ -199,6 +230,9 @@ def publish_trainer_env_info(
     cmdline = _format_argv()
     write_text(prefix + "trainer_argv", cmdline)
 
+    process = f"Number of processes = {jax.process_count()}"
+    write_text(prefix + "process", process)
+
 
 _EvalResultsWriteFn = Callable[[EvalResults, _TrainState, flax_tb.SummaryWriter], None]
 
@@ -207,6 +241,7 @@ def make_eval_results_writer(
     summary_root_dir: Union[str, os.PathLike[str]],
     dataset_filter: Optional[set[str]] = None,
     method: Optional[_EvalResultsWriteFn] = None,
+    write_from_all_processes: bool = False,
 ) -> Callable[[dict[str, EvalResults], _TrainState], None]:
     """Makes a function that publishes evaluation results from different datasets.
 
@@ -214,6 +249,11 @@ def make_eval_results_writer(
         summary_root_dir: Root directory for summaries.
         dataset_filter: If set, only the results from datasets in `dataset_filter`
             will be processed.
+        method: If set, use `method(results, train_state, writer)` to publish the
+            evaluation results `results`. Otherwise, `results.write_to_tensorboard`
+            will be used.
+        write_from_all_processes: If False (default), only the first process of
+            the distributed workers calls `write_to_tensorboard` (or `method`).
 
     Returns:
         A function `tb_writer(results, state)` where `results` is
@@ -230,7 +270,12 @@ def make_eval_results_writer(
             if dataset_filter is not None and name not in dataset_filter:
                 continue
             if name not in writers:
-                writers[name] = flax_tb.SummaryWriter(summary_root_dir / name)
+                should_write = jax.process_index() == 0 or write_from_all_processes
+                writers[name] = (
+                    flax_tb.SummaryWriter(summary_root_dir / name)
+                    if should_write
+                    else NullSummaryWriter()
+                )
             if method is None:
                 result.write_to_tensorboard(st, writers[name])
             else:

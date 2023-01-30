@@ -166,6 +166,57 @@ class EvalResultsPublisherTest(chex.TestCase):
         ]
         self.assertSequenceEqual(sorted(called_datasets), sorted(["devset", "evalset"]))
 
+    @mock.patch("jax.process_count")
+    @mock.patch("jax.process_index")
+    def test_eval_results_writer_switch_in_multi_process_env(
+        self, process_index_mock, process_count_mock
+    ):
+        state = _create_empty_state(step=123)
+        random_test_data = dict(
+            devset=EvalResults.make_random_test_data(),
+            evalset=EvalResults.make_random_test_data(),
+        )
+
+        custom_write_to_tensorboard = mock.MagicMock()
+
+        process_index_mock.return_value = 1
+        process_count_mock.return_value = 4
+        writer_fn = tensorboard.make_eval_results_writer(
+            "/dummy/root_dir", method=custom_write_to_tensorboard
+        )
+        writer_fn(random_test_data, state)
+        custom_write_to_tensorboard.assert_called()
+        for call in custom_write_to_tensorboard.call_args_list:
+            unused_results, unused_train_state, writer = call.args
+            np.testing.assert_(isinstance(writer, tensorboard.NullSummaryWriter))
+
+        custom_write_to_tensorboard.reset_mock()
+        process_index_mock.return_value = 0
+        process_count_mock.return_value = 4
+        writer_fn = tensorboard.make_eval_results_writer(
+            "/dummy/root_dir", method=custom_write_to_tensorboard
+        )
+        writer_fn(random_test_data, state)
+        custom_write_to_tensorboard.assert_called()
+        for call in custom_write_to_tensorboard.call_args_list:
+            unused_results, unused_train_state, writer = call.args
+            print(writer, process_index_mock)
+            np.testing.assert_(isinstance(writer, _SummaryWriterOriginal))
+
+        custom_write_to_tensorboard.reset_mock()
+        process_index_mock.return_value = 1
+        process_count_mock.return_value = 4
+        writer_fn = tensorboard.make_eval_results_writer(
+            "/dummy/root_dir",
+            method=custom_write_to_tensorboard,
+            write_from_all_processes=True,
+        )
+        writer_fn(random_test_data, state)
+        custom_write_to_tensorboard.assert_called()
+        for call in custom_write_to_tensorboard.call_args_list:
+            unused_results, unused_train_state, writer = call.args
+            np.testing.assert_(isinstance(writer, _SummaryWriterOriginal))
+
 
 @mock.patch("logging.log")
 class TrainerEnvPublisherTest(chex.TestCase):
