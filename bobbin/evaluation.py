@@ -18,16 +18,22 @@
 from __future__ import annotations
 
 import collections
+import logging
 from typing import Dict, Generic, Iterable, Iterator, Tuple, TypeVar
 
 from flax import struct
 from flax.metrics import tensorboard as flax_tb
+import jax
 import numpy as np
 
+from .pmap_util import gather_from_jax_processes
 from .pmap_util import unshard
 from .pytypes import Batch
 from .pytypes import BatchGen
 from .training import TrainState
+
+
+T = TypeVar("T")
 
 
 @struct.dataclass
@@ -120,17 +126,45 @@ def eval_batches(
     Returns:
       `EvalResult` for the given batches.
     """
-
     metrics = eval_task.create_eval_results()
-    for batch in batches:
+    batches = iter(batches)
+
+    multi_process = jax.process_count() > 1
+    while True:
+        active = True
+        try:
+            batch = next(batches)
+        except StopIteration:
+            active = False
+            batch = None
+
+        if multi_process:
+            # If multi_process, check if another process is still active.
+            if not np.asarray(gather_from_jax_processes(active)).any():
+                break
+        elif not active:  # Otherwise, just break the loop.
+            break
+
+        # This must be called even when the host is inactive for synchronized
+        # parallel processing.
         new_result = eval_task.evaluate(batch, *args, **kwargs)
-        if not isinstance(new_result, type(metrics)):
-            raise TypeError(
-                f"`eval_task.evaluate` returned {type(new_result)}. It must be"
-                " compatible with the return type of"
-                f" `eval_task.create_eval_results ({type(metrics)})."
-            )
-        metrics = metrics.reduce(new_result)
+        if active:
+            if not isinstance(new_result, type(metrics)):
+                raise TypeError(
+                    f"`eval_task.evaluate` returned {type(new_result)}. It must be"
+                    " compatible with the return type of"
+                    f" `eval_task.create_eval_results ({type(metrics)})."
+                )
+            metrics = metrics.reduce(new_result)
+
+    # Reduce over parallel replicas
+    if multi_process:
+        all_metrics = gather_from_jax_processes(metrics)
+        for process_id, other_metrics in enumerate(all_metrics):
+            if process_id == jax.process_index():
+                continue
+            metrics = metrics.reduce(other_metrics)
+
     metrics = eval_task.finalize_eval_results(metrics)
     return metrics
 
@@ -153,11 +187,14 @@ def eval_datasets(
     """
     results = dict()
     for dsname, batch_gen in batch_gens.items():
-        results[dsname] = eval_batches(eval_task, batch_gen(), *args, **kwargs)
+        logging.info("Start evaluation process over %s", dsname)
+        results[dsname] = eval_batches(
+            eval_task,
+            batch_gen(),
+            *args,
+            **kwargs,
+        )
     return results
-
-
-T = TypeVar("T")
 
 
 @struct.dataclass

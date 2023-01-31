@@ -38,6 +38,7 @@ import flax
 from flax import struct
 from flax.metrics import tensorboard as flax_tb
 from flax.training import checkpoints
+import jax
 
 from .pytypes import Batch
 from .tensorboard import publish_train_intermediates
@@ -226,7 +227,7 @@ class RunEvalKeepBest:
 
         result = eval_results[self._tune_on]
         saved_train_state = None
-        if self._current_best is None:
+        if self._current_best is None and jax.process_index() == 0:
             # Try loading
             self._current_best = _try_deserialize_eval_results(
                 self._results_path, result
@@ -235,10 +236,11 @@ class RunEvalKeepBest:
         if self._current_best is None or result.is_better_than(self._current_best):
             self._current_best = result
 
-            checkpoints.save_checkpoint(
-                self._dest_path, train_state, train_state.step, overwrite=True
-            )
-            write_pytree_json_file(self._results_path, result)
+            if jax.process_index() == 0:
+                checkpoints.save_checkpoint(
+                    self._dest_path, train_state, train_state.step, overwrite=True
+                )
+                write_pytree_json_file(self._results_path, result)
             saved_train_state = train_state
         return RunEvalKeepBestResult(
             eval_results=eval_results,
