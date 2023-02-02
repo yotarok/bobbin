@@ -21,9 +21,14 @@ from typing import Any, Optional
 from absl.testing import absltest
 import chex
 import flax
+import flax.linen as nn
 import jax
+import jax.numpy as jnp
 import numpy as np
+import optax
 
+from bobbin import tensorboard
+from bobbin import training
 from bobbin import var_util
 
 _FrozenDict = flax.core.FrozenDict
@@ -120,6 +125,37 @@ class AddressingTest(chex.TestCase):
         chex.assert_equal(
             [("/elem1", _Pair(x=1, y=2)), ("/elem2", _Pair(x=3, y=4))],
             list(leaves_with_paths),
+        )
+
+    def test_addressing_train_state(self):
+        class TestModel(nn.Module):
+            @nn.compact
+            def __call__(self, x):
+                self.sow(
+                    "tensorboard",
+                    "random",
+                    tensorboard.MplImageSow(
+                        jnp.zeros((3, 3)),
+                        aspect="auto",
+                        origin="lower",
+                        with_colorbar=True,
+                        h_paddings=jnp.zeros((3,)),
+                    ),
+                )
+                return nn.Dense(features=1)(x)
+
+        batch_size = 3
+        dims = 5
+        tx = optax.sgd(0.001)
+        model = TestModel()
+        init_model_vars = model.init(
+            jax.random.PRNGKey(0), np.zeros((batch_size, dims))
+        )
+        train_state = training.initialize_train_state(model.apply, init_model_vars, tx)
+        paths = var_util.nested_vars_to_paths(train_state)
+        np.testing.assert_equal(
+            paths.extra_vars["tensorboard"]["random"][0].image,
+            "/extra_vars/tensorboard/random/0/image",
         )
 
 
