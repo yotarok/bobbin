@@ -13,6 +13,7 @@
 # limitations under the License.
 
 import abc
+import functools
 from typing import Any, Callable, List, Mapping, Optional, Sequence, Union
 
 import chex
@@ -23,6 +24,7 @@ import numpy as np
 from .pytypes import Backend
 from .pytypes import Device
 from .array_util import split_leading_axis
+from .var_util import nested_vars_to_paths
 
 _ArrayTree = chex.ArrayTree
 
@@ -223,3 +225,42 @@ def gather_from_jax_processes(v: _ArrayTree) -> List[_ArrayTree]:
             ret[proc_id] = tree
     assert unset not in ret
     return ret
+
+
+def _check_replica_integrity(x: chex.Array, path: str, rtol: float, atol: float):
+    num_replica, *unused_rest = x.shape
+    for replica in range(1, num_replica):
+        np.testing.assert_allclose(
+            x[replica],
+            x[0],
+            err_msg=(
+                f"Inconsistency found in {replica}-th replica of {path} "
+                f"[shape={x.shape}]"
+            ),
+            atol=atol,
+            rtol=rtol,
+        )
+
+
+def assert_replica_integrity(
+    tree: _ArrayTree, *, is_device_replicated: bool = True, atol=1e-5, rtol=1e-5
+) -> None:
+    """Checks if replicas have exactly same values over devices and processes.
+
+    Args:
+      tree: Values to be verified.
+      is_device_replicated: If True (by default), it assumes that `tree` is
+        already replicated over devices and has the leading axis corresponding
+        to the local device.
+    """
+    if not is_device_replicated:
+        tree = flax.jax_utils.replicate(tree)
+    gathered = jax.pmap(lambda tree: jax.lax.all_gather(tree, "b"), "b")(tree)
+    gathered = flax.jax_utils.unreplicate(gathered)
+    paths = nested_vars_to_paths(gathered)
+
+    jax.tree_util.tree_map(
+        functools.partial(_check_replica_integrity, rtol=rtol, atol=atol),
+        gathered,
+        paths,
+    )

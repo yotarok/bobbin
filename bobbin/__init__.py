@@ -37,6 +37,7 @@ from .evaluation import eval_batches
 from .evaluation import eval_datasets
 from .evaluation import SampledSet
 
+from .pmap_util import assert_replica_integrity
 from .pmap_util import ArgType
 from .pmap_util import BroadcastArg
 from .pmap_util import gather_from_jax_processes

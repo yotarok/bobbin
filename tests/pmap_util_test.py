@@ -139,6 +139,47 @@ class ProcessGatherTest(chex.TestCase):
             results = pmap_util.gather_from_jax_processes(all_data[process_index])
         np.testing.assert_array_equal(results, all_data)
 
+    @unittest.mock.patch("jax.lax.all_gather")
+    @unittest.mock.patch("jax.process_index")
+    @unittest.mock.patch("jax.process_count")
+    def test_integrity_check_normal(
+        self,
+        mock_process_count,
+        mock_process_index,
+        mock_all_gather,
+    ):
+        processes = 4
+        num_devices = 8
+        dims = 7
+        mock_process_count.return_value = processes
+        mock_process_index.return_value = 0
+        mock_all_gather.return_value = np.ones((processes * num_devices, dims))
+
+        with chex.fake_pmap():
+            pmap_util.assert_replica_integrity(np.ones((num_devices, dims)))
+
+    @unittest.mock.patch("jax.lax.all_gather")
+    @unittest.mock.patch("jax.process_index")
+    @unittest.mock.patch("jax.process_count")
+    def test_integrity_check_error(
+        self,
+        mock_process_count,
+        mock_process_index,
+        mock_all_gather,
+    ):
+        processes = 4
+        num_devices = 8
+        dims = 7
+        mock_process_count.return_value = processes
+        mock_process_index.return_value = 0
+        broken_value = np.ones((processes * num_devices, dims))
+        broken_value[25, :] += 0.01
+        mock_all_gather.return_value = broken_value
+
+        with chex.fake_pmap():
+            with np.testing.assert_raises(AssertionError):
+                pmap_util.assert_replica_integrity(np.ones((num_devices, dims)))
+
 
 if __name__ == "__main__":
     absltest.main()
