@@ -17,7 +17,7 @@ Linen modules for ASR
 
 from __future__ import annotations
 
-from typing import Any, Sequence, Tuple, Union, Optional
+from typing import Any, Callable, Iterable, Optional, Sequence, Tuple, Union
 
 import chex
 import flax.linen as nn
@@ -29,6 +29,7 @@ from bobbin.example_lib import asrio
 
 _Array = chex.Array
 ModuleDef = Any
+InitializerFn = Callable[[chex.PRNGKey, chex.Shape, chex.ArrayDType], _Array]
 
 
 def _input_padding_validation(
@@ -225,9 +226,9 @@ class CnnEncoder(nn.Module):
             )
             x = nn.activation.relu(x)
             if self.use_batch_norm:
-                x = nn.BatchNorm(
+                x = PaddedBatchNorm(
                     use_running_average=is_eval, axis_name=batch_norm_axis_name
-                )(x)
+                )(x, pad)
         x = x.reshape(pad.shape + (-1,))
         x = nn.Dense(features=self.num_outputs)(x)
         return x, pad
@@ -276,9 +277,9 @@ class ConformerConvBlock(nn.Module):
             feature_group_count=model_dims,
         )(x)
 
-        x = nn.BatchNorm(
+        x = PaddedBatchNorm(
             use_running_average=deterministic, axis_name=batch_norm_axis_name
-        )(x)
+        )(x, x_paddings)
         x = nn.activation.swish(x)
         x = nn.Dense(features=model_dims)(x)
         if self.residual_dropout_prob > 0:
@@ -594,3 +595,204 @@ class CnnConformerEncoder(nn.Module):
 
         x = nn.Dense(features=self.num_outputs)(x)
         return x, feature_paddings
+
+
+# This function is copied from flax.linen.normalization.
+def _canonicalize_axes(rank: int, axes: Any) -> Tuple[int, ...]:
+    """Returns a tuple of deduplicated, sorted, and positive axes."""
+    if not isinstance(axes, Iterable):
+        axes = (axes,)
+    return tuple(set([rank + axis if axis < 0 else axis for axis in axes]))
+
+
+# This function is copied from flax.linen.normalization.
+def _abs_sq(x):
+    """Computes the elementwise square of the absolute value |x|^2."""
+    if jnp.iscomplexobj(x):
+        return jax.lax.square(jax.lax.real(x)) + jax.lax.square(jax.lax.imag(x))
+    else:
+        return jax.lax.square(x)
+
+
+# This function is adapted from flax.linen.normalization and modified for adding
+# padding support.
+def _compute_stats_with_paddings(
+    x: _Array,
+    x_padding: _Array,
+    axes: Any,
+    dtype: Optional[chex.ArrayDType],
+    axis_name: Optional[str] = None,
+    axis_index_groups: Any = None,
+):
+    if dtype is None:
+        dtype = jnp.result_type(x)
+    # promote x to at least float32, this avoids half precision computation
+    # but preserves double or complex floating points
+    dtype = jnp.promote_types(dtype, jnp.float32)
+    x = jnp.asarray(x, dtype)
+
+    valid = (x_padding < 0.5).astype(dtype)
+    valid_shape = tuple(x.shape[ax] if ax in axes else 1 for ax in range(x.ndim))
+    valid = valid.reshape(valid_shape)
+    x = x * valid
+
+    stat0 = jnp.sum(valid)
+    stat1 = jnp.sum(x, axes)
+    stat2 = jnp.sum(_abs_sq(x), axes)
+    if axis_name is not None:
+        stat0, stat1, stat2 = jax.lax.psum(
+            (stat0, stat1, stat2),
+            axis_name=axis_name,
+            axis_index_groups=axis_index_groups,
+        )
+    mean = stat1 / stat0
+    var = jnp.maximum(0.0, stat2 / stat0 - _abs_sq(mean))
+    return mean, var
+
+
+# This function is copied from flax.linen.normalization.
+def _normalize(
+    mdl: nn.Module,
+    x: _Array,
+    mean: _Array,
+    var: _Array,
+    reduction_axes: Any,
+    feature_axes: Any,
+    dtype: chex.ArrayDType,
+    param_dtype: chex.ArrayDType,
+    epsilon: float,
+    use_bias: bool,
+    use_scale: bool,
+    bias_init: InitializerFn,
+    scale_init: InitializerFn,
+):
+    reduction_axes = _canonicalize_axes(x.ndim, reduction_axes)
+    feature_axes = _canonicalize_axes(x.ndim, feature_axes)
+    stats_shape = list(x.shape)
+    for axis in reduction_axes:
+        stats_shape[axis] = 1
+    mean = mean.reshape(stats_shape)
+    var = var.reshape(stats_shape)
+    feature_shape = [1] * x.ndim
+    reduced_feature_shape = []
+    for ax in feature_axes:
+        feature_shape[ax] = x.shape[ax]
+        reduced_feature_shape.append(x.shape[ax])
+    y = x - mean
+    mul = jax.lax.rsqrt(var + epsilon)
+    args = [x]
+    if use_scale:
+        scale = mdl.param(
+            "scale", scale_init, reduced_feature_shape, param_dtype
+        ).reshape(feature_shape)
+        mul *= scale
+        args.append(scale)
+    y *= mul
+    if use_bias:
+        bias = mdl.param("bias", bias_init, reduced_feature_shape, param_dtype).reshape(
+            feature_shape
+        )
+        y += bias
+        args.append(bias)
+    dtype = nn.dtypes.canonicalize_dtype(*args, dtype=dtype)
+    return jnp.asarray(y, dtype)
+
+
+class PaddedBatchNorm(nn.Module):
+    """BatchNorm module for padded batches.
+
+    See the original documentation for details. The difference from the
+    original module is that this module takes an additional argument
+    `x_paddings` that represents `x[d1, d2, :]` is a padding vector and
+    should not be included in the statistics computation by
+    `x_paddings[d1, d2] > 0.5` (typically 1.0).
+
+    Attributes:
+      use_running_average: if True, the statistics stored in batch_stats
+        will be used instead of computing the batch statistics on the input.
+      axis: the feature or non-batch axis of the input.
+      momentum: decay rate for the exponential moving average of
+        the batch statistics.
+      epsilon: a small float added to variance to avoid dividing by zero.
+      dtype: the dtype of the result (default: infer from input and params).
+      param_dtype: the dtype passed to parameter initializers (default: float32).
+      use_bias:  if True, bias (beta) is added.
+      use_scale: if True, multiply by scale (gamma).
+        When the next layer is linear (also e.g. nn.relu), this can be disabled
+        since the scaling will be done by the next layer.
+      bias_init: initializer for bias, by default, zero.
+      scale_init: initializer for scale, by default, one.
+      axis_name: the axis name used to combine batch statistics from multiple
+        devices. See `jax.pmap` for a description of axis names (default: None).
+      axis_index_groups: groups of axis indices within that named axis
+        representing subsets of devices to reduce over (default: None). For
+        example, `[[0, 1], [2, 3]]` would independently batch-normalize over
+        the examples on the first two and last two devices. See `jax.lax.psum`
+        for more details.
+    """
+
+    use_running_average: Optional[bool] = None
+    axis: int = -1
+    padded_axis: int = -2
+    momentum: float = 0.99
+    epsilon: float = 1e-5
+    dtype: Optional[chex.ArrayDType] = None
+    param_dtype: chex.ArrayDType = jnp.float32
+    use_bias: bool = True
+    use_scale: bool = True
+    bias_init: InitializerFn = nn.initializers.zeros
+    scale_init: InitializerFn = nn.initializers.ones
+    axis_name: Optional[str] = None
+    axis_index_groups: Any = None
+
+    @nn.compact
+    def __call__(
+        self,
+        x: _Array,
+        x_paddings: _Array,
+        use_running_average: Optional[bool] = None,
+    ):
+        use_running_average = nn.merge_param(
+            "use_running_average", self.use_running_average, use_running_average
+        )
+        feature_axes = _canonicalize_axes(x.ndim, self.axis)
+        reduction_axes = tuple(i for i in range(x.ndim) if i not in feature_axes)
+        feature_shape = [x.shape[ax] for ax in feature_axes]
+
+        ra_mean = self.variable(
+            "batch_stats", "mean", lambda s: jnp.zeros(s, jnp.float32), feature_shape
+        )
+        ra_var = self.variable(
+            "batch_stats", "var", lambda s: jnp.ones(s, jnp.float32), feature_shape
+        )
+        if use_running_average:
+            mean, var = ra_mean.value, ra_var.value
+        else:
+            mean, var = _compute_stats_with_paddings(
+                x,
+                x_paddings,
+                reduction_axes,
+                dtype=self.dtype,
+                axis_name=self.axis_name if not self.is_initializing() else None,
+                axis_index_groups=self.axis_index_groups,
+            )
+
+        if not self.is_initializing():
+            ra_mean.value = self.momentum * ra_mean.value + (1 - self.momentum) * mean
+            ra_var.value = self.momentum * ra_var.value + (1 - self.momentum) * var
+
+        return _normalize(
+            self,
+            x,
+            mean,
+            var,
+            reduction_axes,
+            feature_axes,
+            self.dtype,
+            self.param_dtype,
+            self.epsilon,
+            self.use_bias,
+            self.use_scale,
+            self.bias_init,
+            self.scale_init,
+        )
