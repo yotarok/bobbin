@@ -178,6 +178,7 @@ class CnnEncoder(nn.Module):
     use_bias: bool = True
     num_outputs: int = 256
     use_batch_norm: bool = False
+    batch_norm_axis_name: Optional[str] = "batch"
     is_eval: Optional[bool] = None
 
     @nn.compact
@@ -187,9 +188,12 @@ class CnnEncoder(nn.Module):
         feature_paddings: _Array,
         *,
         is_eval: Optional[bool] = None,
+        batch_norm_axis_name: Optional[str] = None,
     ) -> tuple[_Array, _Array]:
         _input_padding_validation("CnnEncoder", features, feature_paddings)
         is_eval = nn.merge_param("is_eval", self.is_eval, is_eval)
+        if self.use_batch_norm:
+            batch_norm_axis_name = batch_norm_axis_name or self.batch_norm_axis_name
         features = features[..., np.newaxis]
 
         depth = len(self.channels)
@@ -221,7 +225,9 @@ class CnnEncoder(nn.Module):
             )
             x = nn.activation.relu(x)
             if self.use_batch_norm:
-                x = nn.BatchNorm(use_running_average=is_eval)(x)
+                x = nn.BatchNorm(
+                    use_running_average=is_eval, axis_name=batch_norm_axis_name
+                )(x)
         x = x.reshape(pad.shape + (-1,))
         x = nn.Dense(features=self.num_outputs)(x)
         return x, pad
@@ -241,16 +247,23 @@ class ConformerConvBlock(nn.Module):
     kernel_size: int = 5
     use_conv_bias: bool = False
     deterministic: Optional[bool] = None
+    batch_norm_axis_name: Optional[str] = "batch"
 
     @nn.compact
     def __call__(
-        self, x: _Array, x_paddings: _Array, deterministic: Optional[bool] = None
+        self,
+        x: _Array,
+        x_paddings: _Array,
+        deterministic: Optional[bool] = None,
+        *,
+        batch_norm_axis_name: Optional[str] = None,
     ) -> _Array:
         _input_padding_validation("ConformerConvBlock", x, x_paddings)
         inputs = x
         deterministic = nn.merge_param(
             "deterministic", deterministic, self.deterministic
         )
+        batch_norm_axis_name = batch_norm_axis_name or self.batch_norm_axis_name
 
         *unused_batch_sizes, unused_time_steps, model_dims = x.shape
         x = nn.LayerNorm()(x)
@@ -263,7 +276,9 @@ class ConformerConvBlock(nn.Module):
             feature_group_count=model_dims,
         )(x)
 
-        x = nn.BatchNorm(use_running_average=deterministic)(x)
+        x = nn.BatchNorm(
+            use_running_average=deterministic, axis_name=batch_norm_axis_name
+        )(x)
         x = nn.activation.swish(x)
         x = nn.Dense(features=model_dims)(x)
         if self.residual_dropout_prob > 0:
