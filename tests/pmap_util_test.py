@@ -91,6 +91,18 @@ class WrappedPmapTest(chex.TestCase):
                 # TODO: Give some analysis on the comment
                 self.assertGreater(sq_dist, 1.0)
 
+    @unittest.mock.patch("jax.pmap")
+    def test_device_specification_default(self, mock_pmap):
+        # Check that by default, `None`s are passed to `jax.pmap`.
+        pmap_util.wrapped_pmap(lambda x: x, "i", ("shard",))
+
+        # Current implementation only calls it once, but it should be okay
+        # as long as it is called with proper arguments.
+        for call in mock_pmap.call_args_list:
+            (f, axis_name) = call.args
+            np.testing.assert_equal(call.kwargs["devices"], None)
+            np.testing.assert_equal(call.kwargs["backend"], None)
+
 
 class ProcessGatherTest(chex.TestCase):
     @parameterized.product(
