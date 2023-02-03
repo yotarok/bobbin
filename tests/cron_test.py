@@ -179,7 +179,6 @@ class RunEvalKeepBestActionTest(chex.TestCase):
     def test_no_io_in_follower_processes(
         self, save_checkpoint, write_json, read_json, process_count, process_index
     ):
-
         process_count.return_value = 4
         process_index.return_value = 2
         run_eval = unittest.mock.MagicMock()
