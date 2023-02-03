@@ -19,6 +19,7 @@ it tested.
 """
 
 from typing import Tuple
+import unittest
 
 from absl.testing import absltest
 from absl.testing import parameterized
@@ -118,6 +119,7 @@ class ConformerConvBlockTest(chex.TestCase):
                 _random_right_paddings(batch_size, max_length, min_length=1),
             ),
             dict(deterministic=deterministic),
+            init_kwargs=dict(batch_norm_axis_name=None),
         )
 
 
@@ -170,14 +172,26 @@ class ConformerBlockTest(chex.TestCase):
         batch_size = 3
         max_length = 5
         model_dims = 16
-        _assert_sanity(
-            asrnn.ConformerBlock,
-            (
-                np.random.normal(size=(batch_size, max_length, model_dims)),
-                _random_right_paddings(batch_size, max_length, min_length=1),
-            ),
-            dict(is_eval=is_eval),
-        )
+
+        conv_block_orig = asrnn.ConformerConvBlock
+
+        def conv_block(**kwargs):
+            kwargs["batch_norm_axis_name"] = None
+            return conv_block_orig(**kwargs)
+
+        # The use of `patch` here is a workaround for the fact that a lot of
+        # sub-modules are hard-coded in asrnn library.
+        with unittest.mock.patch(
+            "bobbin.example_lib.asrnn.ConformerConvBlock", new=conv_block
+        ):
+            _assert_sanity(
+                asrnn.ConformerBlock,
+                (
+                    np.random.normal(size=(batch_size, max_length, model_dims)),
+                    _random_right_paddings(batch_size, max_length, min_length=1),
+                ),
+                dict(is_eval=is_eval),
+            )
 
 
 class SpecAugTest(chex.TestCase):
@@ -256,18 +270,29 @@ class CnnConformerEncoderTest(chex.TestCase):
         max_length = 13
         model_dims = 16
         freq_bins = 80
-        _assert_sanity(
-            asrnn.CnnConformerEncoder,
-            (
-                np.random.normal(size=(batch_size, max_length, freq_bins)),
-                _random_right_paddings(batch_size, max_length, min_length=5),
-            ),
-            dict(is_eval=is_eval),
-            init_kwargs=dict(
-                cnn_def=lambda: asrnn.CnnEncoder(num_outputs=model_dims),
-                num_outputs=model_dims,
-            ),
-        )
+        conv_block_orig = asrnn.ConformerConvBlock
+
+        def conv_block(**kwargs):
+            kwargs["batch_norm_axis_name"] = None
+            return conv_block_orig(**kwargs)
+
+        # The use of `patch` here is a workaround for the fact that a lot of
+        # sub-modules are hard-coded in asrnn library.
+        with unittest.mock.patch(
+            "bobbin.example_lib.asrnn.ConformerConvBlock", new=conv_block
+        ):
+            _assert_sanity(
+                asrnn.CnnConformerEncoder,
+                (
+                    np.random.normal(size=(batch_size, max_length, freq_bins)),
+                    _random_right_paddings(batch_size, max_length, min_length=5),
+                ),
+                dict(is_eval=is_eval),
+                init_kwargs=dict(
+                    cnn_def=lambda: asrnn.CnnEncoder(num_outputs=model_dims),
+                    num_outputs=model_dims,
+                ),
+            )
 
 
 if __name__ == "__main__":
