@@ -142,10 +142,12 @@ def prepare_datasets(
     eval_batch_size: int = 8,
 ) -> tuple[tf.data.Dataset, dict[str, tf.data.Dataset]]:
     builder_kwargs = dict(config="lazy_decode")
+    read_config = tfds.ReadConfig(shuffle_seed=jax.process_index())
     train_dataset = tfds.load(
         "librispeech",
         split="train_clean100+train_clean360+train_other500",
         data_dir=tfds_data_dir,
+        read_config=read_config,
         builder_kwargs=builder_kwargs,
         shuffle_files=True,
         download=False,
@@ -363,20 +365,6 @@ class EvalResults(bobbin.EvalResults):
             + f" ({self.sentences_per_second} sentences/sec)\n"
             + sample_summary
         )
-
-    def preduce(self, axis_name: str) -> EvalResults:
-        kwargs = dict()
-        for key in self._sum_fields:
-            kwargs[key] = jax.tree_util.tree_map(
-                lambda x: jax.lax.psum(x, axis_name=axis_name), getattr(self, key)
-            )
-        # Sampled senteces and time metrics are okay not to reduce.
-        kwargs.update(
-            start_time=self.start_time,
-            end_time=self.end_time,
-            sampled_results=self.sampled_results,
-        )
-        return EvalResults(**kwargs)
 
     def reduce(self, other: EvalResults) -> EvalResults:
         kwargs = dict()
@@ -611,6 +599,8 @@ def main(args: argparse.Namespace):
         *init_inputs,
     )
 
+    prng_keys = bobbin.prng_keygen(jax.random.PRNGKey(jax.process_index() * 123))
+
     task = CtcAsrTask(model)
     evaler = EvalTask(model, wpm_vocab)
     eval_batch_gens = {dsname: ds.as_numpy_iterator for dsname, ds in eval_dss.items()}
@@ -619,11 +609,10 @@ def main(args: argparse.Namespace):
         model.apply, init_model_vars, tx, checkpoint_path=all_checkpoint_path
     )
     train_state = flax.jax_utils.replicate(train_state, jax.local_devices())
+    if jax.process_count() > 1:
+        bobbin.assert_replica_integrity(train_state)
     train_step_fn = bobbin.pmap_for_train_step(
-        jax.jit(
-            task.make_training_step_fn(split_steps=args.split_training_batch),
-            donate_argnums=(1,),
-        )
+        task.make_training_step_fn(split_steps=args.split_training_batch),
     )
 
     train_writer = (
