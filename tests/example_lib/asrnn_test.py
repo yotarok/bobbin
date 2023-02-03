@@ -295,5 +295,49 @@ class CnnConformerEncoderTest(chex.TestCase):
             )
 
 
+class PaddedBatchNormTest(chex.TestCase):
+    @parameterized.product(
+        use_running_average=[False, True], complex_input=[False, True]
+    )
+    def test_sanity(self, use_running_average, complex_input):
+        batch_size = 3
+        max_length = 5
+        dims = 16
+
+        x = np.random.normal(size=(batch_size, max_length, dims))
+        if complex_input:
+            x = x + 1.0j * np.random.normal(size=(batch_size, max_length, dims))
+        _assert_sanity(
+            asrnn.PaddedBatchNorm,
+            (
+                x,
+                _random_right_paddings(batch_size, max_length, min_length=1),
+            ),
+            dict(use_running_average=use_running_average),
+        )
+
+    def test_paddings(self):
+        batch_size = 3
+        max_length = 17
+        dims = 5
+
+        # momentum set to 0 so the computed means can directly be obtained.
+        module = asrnn.PaddedBatchNorm(use_running_average=False, momentum=0)
+        x = np.ones((batch_size, max_length, dims))
+        x_paddings = _random_right_paddings(batch_size, max_length, min_length=5)
+        x_mask = (1.0 - x_paddings)[..., np.newaxis]
+
+        x += x_mask * 3.0  # non-padded elements will be 1.0 + 3.0 = 4.0
+        mod_vars = module.init(jax.random.PRNGKey(0), x, x_paddings)
+        y, mod_vars = module.apply(mod_vars, x, x_paddings, mutable=["batch_stats"])
+
+        # Check mean normalized
+        np.testing.assert_allclose(y * x_mask, np.zeros((batch_size, max_length, dims)))
+        # Computed mean was 4.0
+        np.testing.assert_allclose(
+            mod_vars["batch_stats"]["mean"], np.full((dims,), 4.0)
+        )
+
+
 if __name__ == "__main__":
     absltest.main()
