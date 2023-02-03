@@ -145,14 +145,11 @@ def wrapped_pmap(
     Returns:
         Wrapped function that runs on multiple devices.
     """
-    if backend is None:
-        backend = jax.default_backend()
-    if devices is None:
-        devices = jax.local_devices(backend=backend)
     if wrap_return is None:
         wrap_return = _id_fn
     if kwargtypes is None:
         kwargtypes = dict()
+    local_devices = jax.local_devices(backend=backend) if devices is None else devices
 
     argtypes = [resolve_argtype_str(ty) for ty in argtypes]
     kwargtypes = {k: resolve_argtype_str(ty) for k, ty in kwargtypes.items()}
@@ -183,8 +180,10 @@ def wrapped_pmap(
                     "`kwargtypes` specified to `autopmap` does not contain "
                     f"specification of kwarg with key={k}"
                 )
-        args = [ty.transform(x, devices) for x, ty in zip(args, argtypes)]
-        kwargs = {k: kwargtypes[k].transform(x, devices) for k, x in kwargs.items()}
+        args = [ty.transform(x, local_devices) for x, ty in zip(args, argtypes)]
+        kwargs = {
+            k: kwargtypes[k].transform(x, local_devices) for k, x in kwargs.items()
+        }
         ret = pmapped_f(*args, **kwargs)
         return wrap_return(ret)
 
