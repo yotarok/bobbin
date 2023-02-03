@@ -67,15 +67,13 @@ def nested_vars_to_paths(
         # Fill placeholder in the places of deemed leaves for mimicking
         # `_nested_structs_to_dict` (that uses `flax.serialization.to_state_dict`)
         placeholder = -1
-        node = jax.tree_map(
+        node = jax.tree_util.tree_map(
             lambda x: placeholder if is_leaf(x) else x, node, is_leaf=is_leaf
         )
 
     node_dict = _nested_structs_to_dicts(node)
     paths_dicts = _nested_dicts_to_paths(node_dict, pathsep=pathsep)
-    paths, unused_treedef = jax.tree_util.tree_flatten(paths_dicts)
-    treedef = jax.tree_util.tree_structure(node)
-    return jax.tree_util.tree_unflatten(treedef, paths)
+    return flax.serialization.from_state_dict(node, paths_dicts)
 
 
 def flatten_with_paths(
