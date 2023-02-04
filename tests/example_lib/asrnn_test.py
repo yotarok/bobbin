@@ -25,6 +25,7 @@ from absl.testing import absltest
 from absl.testing import parameterized
 from bobbin.example_lib import asrnn
 import chex
+import flax
 import flax.linen as nn
 import jax
 import numpy as np
@@ -344,6 +345,31 @@ class PaddedBatchNormTest(chex.TestCase):
         # ^ In fact, `y` is all-zero even without multiplying `x_paddings`
         # (since non-padding part is mean-normalized and should be zero), but
         # here it is done for clarity.
+
+    def test_mutability(self):
+        batch_size = 3
+        max_length = 17
+        dims = 5
+
+        x = np.ones((batch_size, max_length, dims))
+        x_paddings = _random_right_paddings(batch_size, max_length, min_length=5)
+
+        module = asrnn.PaddedBatchNorm()
+        mod_vars = module.init(
+            jax.random.PRNGKey(0), x, x_paddings, use_running_average=False
+        )
+
+        # default (training) mode
+        with np.testing.assert_raises(flax.errors.ModifyScopeVariableError):
+            module.apply(mod_vars, x, x_paddings, use_running_average=False)
+
+        # This will not raise an exception
+        unused_y, updated_vars = module.apply(
+            mod_vars, x, x_paddings, use_running_average=False, mutable=["batch_stats"]
+        )
+
+        # and neither does this.
+        module.apply(mod_vars, x, x_paddings, use_running_average=True)
 
 
 if __name__ == "__main__":
