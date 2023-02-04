@@ -337,6 +337,13 @@ class PaddedBatchNormTest(chex.TestCase):
         np.testing.assert_allclose(
             mod_vars["batch_stats"]["mean"], np.full((dims,), 4.0)
         )
+        # Results are cleared for padded elements
+        np.testing.assert_allclose(
+            y * x_paddings[..., np.newaxis], np.zeros((batch_size, max_length, dims))
+        )
+        # ^ In fact, `y` is all-zero even without multiplying `x_paddings`
+        # (since non-padding part is mean-normalized and should be zero), but
+        # here it is done for clarity.
 
 
 if __name__ == "__main__":

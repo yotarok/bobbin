@@ -616,9 +616,9 @@ def _abs_sq(x):
 
 # This function is adapted from flax.linen.normalization and modified for adding
 # padding support.
-def _compute_stats_with_paddings(
+def _compute_stats_with_mask(
     x: _Array,
-    x_padding: _Array,
+    mask: _Array,
     axes: Any,
     dtype: Optional[chex.ArrayDType],
     axis_name: Optional[str] = None,
@@ -631,12 +631,9 @@ def _compute_stats_with_paddings(
     dtype = jnp.promote_types(dtype, jnp.float32)
     x = jnp.asarray(x, dtype)
 
-    valid = (x_padding < 0.5).astype(dtype)
-    valid_shape = tuple(x.shape[ax] if ax in axes else 1 for ax in range(x.ndim))
-    valid = valid.reshape(valid_shape)
-    x = x * valid
+    x = x * mask
 
-    stat0 = jnp.sum(valid)
+    stat0 = jnp.sum(mask)
     stat1 = jnp.sum(x, axes)
     stat2 = jnp.sum(_abs_sq(x), axes)
     if axis_name is not None:
@@ -759,6 +756,11 @@ class PaddedBatchNorm(nn.Module):
         reduction_axes = tuple(i for i in range(x.ndim) if i not in feature_axes)
         feature_shape = [x.shape[ax] for ax in feature_axes]
 
+        mask = x_paddings < 0.5
+        mask_shape = tuple(
+            x.shape[ax] if ax in reduction_axes else 1 for ax in range(x.ndim)
+        )
+        mask = mask.reshape(mask_shape).astype(self.dtype)
         ra_mean = self.variable(
             "batch_stats", "mean", lambda s: jnp.zeros(s, jnp.float32), feature_shape
         )
@@ -768,9 +770,9 @@ class PaddedBatchNorm(nn.Module):
         if use_running_average:
             mean, var = ra_mean.value, ra_var.value
         else:
-            mean, var = _compute_stats_with_paddings(
+            mean, var = _compute_stats_with_mask(
                 x,
-                x_paddings,
+                mask,
                 reduction_axes,
                 dtype=self.dtype,
                 axis_name=self.axis_name if not self.is_initializing() else None,
@@ -781,7 +783,7 @@ class PaddedBatchNorm(nn.Module):
             ra_mean.value = self.momentum * ra_mean.value + (1 - self.momentum) * mean
             ra_var.value = self.momentum * ra_var.value + (1 - self.momentum) * var
 
-        return _normalize(
+        results = _normalize(
             self,
             x,
             mean,
@@ -796,3 +798,5 @@ class PaddedBatchNorm(nn.Module):
             self.bias_init,
             self.scale_init,
         )
+        results = results * mask
+        return results
