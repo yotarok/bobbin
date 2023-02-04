@@ -779,9 +779,11 @@ class PaddedBatchNorm(nn.Module):
                 axis_index_groups=self.axis_index_groups,
             )
 
-        if not self.is_initializing():
-            ra_mean.value = self.momentum * ra_mean.value + (1 - self.momentum) * mean
-            ra_var.value = self.momentum * ra_var.value + (1 - self.momentum) * var
+            if not self.is_initializing():
+                ra_mean.value = (
+                    self.momentum * ra_mean.value + (1 - self.momentum) * mean
+                )
+                ra_var.value = self.momentum * ra_var.value + (1 - self.momentum) * var
 
         results = _normalize(
             self,
