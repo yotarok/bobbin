@@ -22,6 +22,7 @@ import dataclasses
 from etils import epath
 import functools
 import logging
+import os
 import sys
 import tempfile
 import time
@@ -538,13 +539,29 @@ def fill_default_arguments(args: argparse.Namespace):
         args.feature_normalizer = str(p)
 
 
+def _is_running_on_cloud_tpu_vm() -> bool:
+    libtpu_found = False
+    try:
+        # pytype: disable=import-error
+        import libtpu
+
+        del libtpu
+        # pytype: enable=import-error
+        libtpu_found = True
+    except ImportError:
+        pass
+    return os.environ.get("CLOUDSDK_PYTHON", None) is not None and libtpu_found
+
+
 def main(args: argparse.Namespace):
     fill_default_arguments(args)
 
-    jax.distributed.initialize()
     if jax.process_index() == 0:
         logging.basicConfig(stream=sys.stderr)
         logging.root.setLevel(logging.INFO)
+
+    if _is_running_on_cloud_tpu_vm() or args.multi_process:
+        jax.distributed.initialize()
 
     train_ds, eval_dss = prepare_datasets(
         tfds_data_dir=args.tfds_data_dir,
@@ -662,6 +679,7 @@ if __name__ == "__main__":
     argparser.add_argument("--wpm_size_limit", type=int, default=1024)
     argparser.add_argument("--log_dir_path", type=epath.Path, default="log")
     argparser.add_argument("--split_training_batch", type=int, default=None)
+    argparser.add_argument("--multi_process", type=bool, default=False)
 
     args = argparser.parse_args()
     main(args)
