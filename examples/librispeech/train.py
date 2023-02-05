@@ -141,6 +141,7 @@ def prepare_datasets(
     wpm_size_limit: Optional[int] = None,
     train_batch_size: int = 64,
     eval_batch_size: int = 8,
+    max_train_batches: Optional[int] = None,
 ) -> tuple[tf.data.Dataset, dict[str, tf.data.Dataset]]:
     builder_kwargs = dict(config="lazy_decode")
     read_config = tfds.ReadConfig(shuffle_seed=jax.process_index())
@@ -184,6 +185,9 @@ def prepare_datasets(
         batch_dataset(ds, batch_size=eval_batch_size, is_train=False)
         for ds in eval_datasets
     ]
+
+    if max_train_batches is not None:
+        train_dataset = train_dataset.take(max_train_batches)
 
     train_dataset, *eval_datasets = [
         ds.prefetch(1) for ds in (train_dataset, *eval_datasets)
@@ -569,6 +573,7 @@ def main(args: argparse.Namespace):
         wpm_size_limit=args.wpm_size_limit,
         train_batch_size=args.per_device_batch_size * jax.local_device_count(),
         eval_batch_size=args.per_device_batch_size * jax.local_device_count(),
+        max_train_batches=args.max_steps,
     )
     num_train_samples = 28_539 + 104_014 + 148_688
 
@@ -587,9 +592,10 @@ def main(args: argparse.Namespace):
     )
     normalizer = None
     if args.feature_normalizer is not None:
-        normalizer = bobbin.parse_pytree_json(
-            open(args.feature_normalizer).read(), asrio.MeanVarNormalizer.empty()
-        )
+        with open(args.feature_normalizer) as f:
+            normalizer = bobbin.parse_pytree_json(
+                f.read(), asrio.MeanVarNormalizer.empty()
+            )
     model = CtcAsrModel(num_outputs=wpm_size, feature_normalizer=normalizer)
 
     # init must be deterministic for multi-host training
@@ -679,7 +685,8 @@ if __name__ == "__main__":
     argparser.add_argument("--wpm_size_limit", type=int, default=1024)
     argparser.add_argument("--log_dir_path", type=epath.Path, default="log")
     argparser.add_argument("--split_training_batch", type=int, default=None)
-    argparser.add_argument("--multi_process", type=bool, default=False)
+    argparser.add_argument("--multi_process", type=bool, default=None)
+    argparser.add_argument("--max_steps", type=int, default=None)
 
     args = argparser.parse_args()
     main(args)

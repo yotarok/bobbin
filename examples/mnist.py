@@ -21,7 +21,7 @@ import argparse
 import functools
 import logging
 import sys
-from typing import Dict, Sequence, Tuple
+from typing import Dict, Optional, Sequence, Tuple
 
 import chex
 from etils import epath
@@ -224,6 +224,7 @@ class EvalTask(bobbin.EvalTask):
 
 def get_datasets(
     batch_size: int = 64,
+    max_train_batches: Optional[int] = None,
 ) -> Tuple[tf.data.Dataset, Dict[str, tf.data.Dataset]]:
     train_ds = tfds.load("mnist", split="train[:50000]", as_supervised=True)
     train_ds = preprocess_ds(train_ds, batch_size=batch_size, is_training=True)
@@ -235,6 +236,9 @@ def get_datasets(
         k: preprocess_ds(ds, batch_size=batch_size, is_training=False)
         for k, ds in eval_dss.items()
     }
+
+    if max_train_batches is not None:
+        train_ds = train_ds.take(max_train_batches)
     return train_ds, eval_dss
 
 
@@ -248,7 +252,7 @@ def make_model() -> nn.Module:
 
 def main(args: argparse.Namespace):
     prng_keys = bobbin.prng_keygen(jax.random.PRNGKey(0))
-    train_ds, eval_dss = get_datasets()
+    train_ds, eval_dss = get_datasets(max_train_batches=args.max_steps)
     all_checkpoint_path = args.log_dir_path / "all_ckpts"
     best_checkpoint_path = args.log_dir_path / "best_ckpts"
     tensorboard_path = args.log_dir_path / "tensorboard"
@@ -301,16 +305,12 @@ def main(args: argparse.Namespace):
     )
     crontab.schedule(bobbin.PublishTrainingProgress(train_writer), step_interval=100)
 
-    steps_done = 0
     logging.info("Main loop started.")
     for batch in train_ds.as_numpy_iterator():
         train_state, step_info = train_step_fn(train_state, batch, next(prng_keys))
         train_state_0 = flax.jax_utils.unreplicate(train_state)
         crontab.run(train_state_0, step_info=step_info)
         del train_state.extra_vars["tensorboard"]
-        steps_done += 1
-        if args.max_steps is not None and steps_done >= args.max_steps:
-            break
 
 
 if __name__ == "__main__":

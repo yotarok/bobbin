@@ -21,13 +21,13 @@ import argparse
 import dataclasses
 import tempfile
 from typing import Dict
+import unittest
 import sys
 
 from absl.testing import absltest
 from etils import epath
 import numpy as np
 import tensorflow as tf
-
 
 _EXAMPLES_DIR = epath.Path(__file__).parent.parent / "examples"
 
@@ -36,12 +36,30 @@ _EXAMPLES_DIR = epath.Path(__file__).parent.parent / "examples"
 class MockedTfds:
     load_return_values: Dict[str, tf.data.Dataset]
 
-    def load(self, name, *args, split, **kwargs):
+    class ReadConfig(unittest.mock.MagicMock):
+        pass
+
+    def load(self, name, *, split, **kwargs):
+        if isinstance(split, str):
+            return self._load_one(name, split=split, **kwargs)
+        elif hasattr(split, "__iter__"):
+            return [self._load_one(name, split=s, **kwargs) for s in split]
+        else:
+            raise ValueError(
+                "Unsupported split specifier for `MockedTfds.load` "
+                " string or list of splits are expected, however "
+                f"{type(split)} is given."
+            )
+
+    def _load_one(self, name, *, split, **kwargs):
         key = name + "_" + split
         if key in self.load_return_values:
             return self.load_return_values[key]
         elif "" in self.load_return_values:
             return self.load_return_values[""]
+
+    def split_for_jax_process(self, split):
+        return split
 
 
 def _mocked_supervised_mnist(size: int = 128) -> tf.data.Dataset:
@@ -57,6 +75,33 @@ def _mocked_supervised_mnist(size: int = 128) -> tf.data.Dataset:
             tf.TensorSpec(shape=(28, 28, 1), dtype=tf.uint8),
             tf.TensorSpec(shape=(), dtype=tf.int64),
         ),
+    )
+
+
+def _mocked_librispeech(size: int = 128) -> tf.data.Dataset:
+    def gen():
+        for n in range(size):
+            length = np.random.randint(16000, 48000)
+            speech = np.random.randint(
+                -(2**15), 2**15, dtype=np.int16, size=(length,)
+            )
+            yield {
+                "chapter_id": 0,
+                "id": "mocked_speech_{n:05d}",
+                "speaker_id": n % 5,
+                "speech": speech,
+                "text": "THIS IS {n}-th SENTENCE IN GENERATED DATASET",
+            }
+
+    return tf.data.Dataset.from_generator(
+        gen,
+        output_signature={
+            "chapter_id": tf.TensorSpec(shape=(), dtype=tf.int64),
+            "id": tf.TensorSpec(shape=(), dtype=tf.string),
+            "speaker_id": tf.TensorSpec(shape=(), dtype=tf.int64),
+            "speech": tf.TensorSpec(shape=(None), dtype=tf.int16),
+            "text": tf.TensorSpec(shape=(), dtype=tf.string),
+        },
     )
 
 
@@ -79,8 +124,33 @@ class MnistExampleTest(absltest.TestCase):
             for split in ("train", "dev", "test"):
                 np.testing.assert_((tensorboard_path / split).is_dir())
 
-            np.testing.assert_(args.log_dir_path / "all_ckpts")
-            np.testing.assert_(args.log_dir_path / "best_ckpts")
+            np.testing.assert_((args.log_dir_path / "all_ckpts").is_dir())
+            np.testing.assert_((args.log_dir_path / "best_ckpts").is_dir())
+
+
+class LibriSpeechExampleTest(absltest.TestCase):
+    def test_invoke(self):
+        sys.path.append(str(_EXAMPLES_DIR))
+        sys.modules["tensorflow_datasets"] = MockedTfds(
+            load_return_values={"": _mocked_librispeech()}
+        )
+        import librispeech.train  # pytype: disable=import-error
+
+        with tempfile.TemporaryDirectory() as logdir:
+            args = argparse.Namespace()
+            args.log_dir_path = epath.Path(logdir)
+            args.max_steps = 0
+
+            # The rests are default.
+            args.tfds_data_dir = None
+            args.feature_normalizer = None
+            args.per_device_batch_size = 8
+            args.wpm_vocab = None
+            args.wpm_size_limit = 1024
+            args.split_training_batch = None
+            args.multi_process = None
+
+            librispeech.train.main(args)
 
 
 if __name__ == "__main__":
