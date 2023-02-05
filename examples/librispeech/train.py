@@ -418,19 +418,6 @@ class EvalResults(bobbin.EvalResults):
             )
 
 
-def _detokenize(
-    wpm_vocab: asrio.WpmVocab,
-    ids: Iterable[int],
-    unk_text: str = "█",
-    word_boundary_text: str = "▁",
-) -> str:
-    return (
-        "".join(wpm_vocab.id2str.get(i, unk_text) for i in ids)
-        .replace(word_boundary_text, " ")
-        .strip()
-    )
-
-
 class EvalTask(bobbin.EvalTask):
     def __init__(self, model: nn.Module, wpm_vocab: asrio.WpmVocab):
         self.model = model
@@ -468,8 +455,8 @@ class EvalTask(bobbin.EvalTask):
             if not ref_ids:
                 continue  # all-pad sequences are treated as invalid sequence.
             acc_token_error = acc_token_error.accumulate(hyp_ids, ref_ids)
-            hyp_text = _detokenize(self.wpm_vocab, hyp_ids)
-            ref_text = _detokenize(self.wpm_vocab, ref_ids)
+            hyp_text = asrio.wpm_decode_sentence(self.wpm_vocab, hyp_ids)
+            ref_text = asrio.wpm_decode_sentence(self.wpm_vocab, ref_ids)
             acc_word_error = acc_word_error.accumulate(
                 hyp_text.split(" "), ref_text.split(" ")
             )

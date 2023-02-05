@@ -19,7 +19,7 @@ from __future__ import annotations
 from collections.abc import Sequence
 import dataclasses
 import difflib
-from typing import Any, Dict, List, Optional, Tuple, Union
+from typing import Any, Dict, Iterable, List, Optional, Tuple, Union
 
 import chex
 from flax import struct
@@ -110,6 +110,19 @@ def wpm_encode_sentence(vocab: WpmVocab, s: Union[str, bytes]) -> List[int]:
     for w in words:
         ret.extend(wpm_encode(vocab, w))
     return ret
+
+
+def wpm_decode_sentence(
+    wpm_vocab: WpmVocab,
+    ids: Iterable[int],
+    unk_text: str = "█",
+    word_boundary_text: str = "▁",
+) -> str:
+    return (
+        "".join(wpm_vocab.id2str.get(i, unk_text) for i in ids)
+        .replace(word_boundary_text, " ")
+        .strip()
+    )
 
 
 def _hertz_to_mel(frequencies_hertz: Union[float, int, _Array]) -> _Array:
