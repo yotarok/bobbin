@@ -256,14 +256,16 @@ class LossAuxOut:
 
 
 class CtcAsrTask(bobbin.TrainTask):
-    def __init__(self, model: nn.Module):
+    def __init__(self, model: nn.Module, learn_rate_fn):
+        self._learn_rate_fn = learn_rate_fn
         self._model = model
 
     def compute_loss(
-        self, params, batch, *, extra_vars, prng_key
+        self, params, batch, *, extra_vars, prng_key, step
     ) -> Tuple[chex.Scalar, Tuple[_VarCollection, LossAuxOut]]:
         model_vars = extra_vars.copy()
-        model_vars.update(params=params, intermediates=dict())
+        # Update params, and clear tensorboard SoWs.
+        model_vars.update(params=params, tensorboard=dict())
         rng_dropout, rng_specaug = jax.random.split(prng_key)
         (logits, logit_paddings), updated_vars = self._model.apply(
             model_vars,
@@ -283,6 +285,7 @@ class CtcAsrTask(bobbin.TrainTask):
         loss = jnp.mean(per_token_loss)
         tb_vars = updated_vars["tensorboard"].unfreeze()
         tb_vars["loss"] = bobbin.ScalarSow(loss)
+        tb_vars["learn_rate"] = bobbin.ScalarSow(self._learn_rate_fn(step))
         updated_vars = updated_vars.copy(dict(tensorboard=tb_vars))
         return loss, (
             updated_vars,
@@ -600,10 +603,10 @@ def main(args: argparse.Namespace):
 
     prng_key = jax.random.PRNGKey(jax.process_index() + 3)
 
-    task = CtcAsrTask(model)
+    tx, learn_rate_fn = make_tx()
+    task = CtcAsrTask(model, learn_rate_fn)
     evaler = EvalTask(model, wpm_vocab)
     eval_batch_gens = {dsname: ds.as_numpy_iterator for dsname, ds in eval_dss.items()}
-    tx, learn_rate_fn = make_tx()
     train_state = bobbin.initialize_train_state(
         model.apply, init_model_vars, tx, checkpoint_path=all_checkpoint_path
     )
@@ -649,15 +652,7 @@ def main(args: argparse.Namespace):
     for batch in train_ds.as_numpy_iterator():
         rng, prng_key = jax.random.split(prng_key)
         train_state, step_info = train_step_fn(train_state, batch, rng)
-        train_state_0 = flax.jax_utils.unreplicate(train_state)
-        extra_vars = train_state_0.extra_vars
-        extra_vars["tensorboard"] = extra_vars["tensorboard"].unfreeze()
-        extra_vars["tensorboard"]["learn_rate"] = bobbin.ScalarSow(
-            learn_rate_fn(train_state_0.step)
-        )
-        train_state_0 = train_state_0.replace(extra_vars=extra_vars)
-        crontab.run(train_state_0, step_info=step_info)
-        del train_state.extra_vars["tensorboard"]
+        crontab.run(train_state, step_info=step_info)
 
 
 if __name__ == "__main__":

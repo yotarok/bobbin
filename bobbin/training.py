@@ -93,6 +93,7 @@ def _split_and_apply_value_and_grad(
     split_steps: int,
     extra_vars: VarCollection,
     prng_key: _PRNGKey,
+    step: chex.Scalar,
 ) -> ValueAndGradResult:
     """Applies value_and_grad function to split batches and merges results.
 
@@ -120,6 +121,7 @@ def _split_and_apply_value_and_grad(
         jax.tree_util.tree_map(lambda x: x[0], microbatches),
         extra_vars=extra_vars,
         prng_key=rng,
+        step=step,
     )  # pytype: disable=wrong-keyword-args
     loss_aux_list = [loss_aux_0]
     for step in range(1, split_steps):
@@ -130,6 +132,7 @@ def _split_and_apply_value_and_grad(
             jax.tree_util.tree_map(lambda x: x[step], microbatches),
             extra_vars=extra_vars,
             prng_key=prng_key,
+            step=step,
         )  # pytype: disable=wrong-keyword-args
         loss += split_loss
         loss_aux_list.append(split_aux)
@@ -163,7 +166,9 @@ class TrainTask:
         raise NotImplementedError()
 
     def make_training_step_fn(
-        self, pmap_axis_name: Optional[str] = "batch", split_steps: Optional[int] = None
+        self,
+        pmap_axis_name: Optional[str] = "batch",
+        split_steps: Optional[int] = None,
     ) -> TrainingStepFn:
         """Creates training step function."""
 
@@ -191,6 +196,7 @@ class TrainTask:
                     batch,
                     extra_vars=train_state.extra_vars,
                     prng_key=prng_key,
+                    step=train_state.step,
                 )
             else:
                 (
@@ -203,6 +209,7 @@ class TrainTask:
                     split_steps=split_steps,
                     extra_vars=train_state.extra_vars,
                     prng_key=prng_key,
+                    step=train_state.step,
                 )
 
             if pmap_axis_name is not None:

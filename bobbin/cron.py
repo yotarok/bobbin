@@ -391,13 +391,24 @@ class CronTab:
         self._actions.append((name, trigger, action))
         return self
 
-    def run(self, train_state: _TrainState, *args, **kwargs) -> Dict[str, Any]:
+    def run(
+        self,
+        train_state: _TrainState,
+        is_train_state_replicated: bool = True,
+        *args,
+        **kwargs,
+    ) -> Dict[str, Any]:
         """Checks triggers and run the corresponding actions if needed.
 
         Args:
           train_state: current training state.
+          is_train_state_replicated: if True (by default), `train_state` will be
+            unreplicated before given to actions.
           *args, **kwargs: extra parameters passed to the actions.
         """
+
+        if is_train_state_replicated:
+            train_state = flax.jax_utils.unreplicate(train_state)
         results = dict()
         for name, trig, act in self._actions:
             if trig.check(train_state):
