@@ -44,10 +44,6 @@ class EvalResults:
         """Format `EvalResult` to a logging-friendly string."""
         return str(self)
 
-    def preduce(self, axis_name: str) -> EvalResults:
-        """Combines sharded `EvalResult` with `jax.lax.p*` methods."""
-        raise NotImplementedError()
-
     def reduce(self, other: EvalResults) -> EvalResults:
         """Combines two `EvalResult`s."""
         raise NotImplementedError()

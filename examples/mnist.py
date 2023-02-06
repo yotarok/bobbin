@@ -128,11 +128,6 @@ class EvalResults(bobbin.EvalResults):
             f"logprob = {self.sum_logprobs}"
         )
 
-    def preduce(self, axis_name: str) -> EvalResults:
-        return jax.tree_util.tree_map(
-            lambda x: jax.lax.psum(x, axis_name=axis_name), self
-        )
-
     def reduce(self, other: EvalResults) -> EvalResults:
         return EvalResults(
             correct_count=self.correct_count + other.correct_count,
