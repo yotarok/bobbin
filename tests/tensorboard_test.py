@@ -110,7 +110,10 @@ def _create_empty_state(step: int) -> flax.training.train_state.TrainState:
 class EvalResultsPublisherTest(chex.TestCase):
     def test_eval_results_writer(self):
         state = _create_empty_state(step=123)
-        writer_fn = tensorboard.make_eval_results_writer("/dummy/root_dir")
+        writer = tensorboard.MultiDirectorySummaryWriter(
+            "/dummy/root_dir", keys=("devset", "evalset")
+        )
+        writer_fn = writer.as_result_processor()
         EvalResults.write_to_tensorboard = mock.MagicMock()
         writer_fn(
             dict(
@@ -125,34 +128,31 @@ class EvalResultsPublisherTest(chex.TestCase):
         ]
         self.assertSequenceEqual(sorted(called_datasets), sorted(["devset", "evalset"]))
 
-    def test_eval_results_writer_with_filtering(self):
+    def test_eval_results_writer_with_error(self):
         state = _create_empty_state(step=123)
-        writer_fn = tensorboard.make_eval_results_writer(
-            "/dummy/root_dir", set(["devset", "trainset"])
+        writer = tensorboard.MultiDirectorySummaryWriter(
+            "/dummy/root_dir", keys=("devset", "evalset")
         )
+        writer_fn = writer.as_result_processor()
         EvalResults.write_to_tensorboard = mock.MagicMock()
-        writer_fn(
-            dict(
-                devset=EvalResults.make_random_test_data(),
-                evalset=EvalResults.make_random_test_data(),
-                trainset=EvalResults.make_random_test_data(),
-            ),
-            state,
-        )
-        called_datasets = [
-            call.args[1].dest_path.name
-            for call in EvalResults.write_to_tensorboard.call_args_list
-        ]
-        self.assertSequenceEqual(
-            sorted(called_datasets), sorted(["devset", "trainset"])
-        )
+
+        with np.testing.assert_raises(ValueError):
+            writer_fn(
+                dict(
+                    devset=EvalResults.make_random_test_data(),
+                    evalset=EvalResults.make_random_test_data(),
+                    trainset=EvalResults.make_random_test_data(),
+                ),
+                state,
+            )
 
     def test_eval_results_writer_with_custom_writer(self):
         state = _create_empty_state(step=123)
         custom_write_to_tensorboard = mock.MagicMock()
-        writer_fn = tensorboard.make_eval_results_writer(
-            "/dummy/root_dir", method=custom_write_to_tensorboard
+        writer = tensorboard.MultiDirectorySummaryWriter(
+            "/dummy/root_dir", keys=("devset", "evalset")
         )
+        writer_fn = writer.as_result_processor(method=custom_write_to_tensorboard)
         writer_fn(
             dict(
                 devset=EvalResults.make_random_test_data(),
@@ -181,9 +181,10 @@ class EvalResultsPublisherTest(chex.TestCase):
 
         process_index_mock.return_value = 1
         process_count_mock.return_value = 4
-        writer_fn = tensorboard.make_eval_results_writer(
-            "/dummy/root_dir", method=custom_write_to_tensorboard
+        writer = tensorboard.MultiDirectorySummaryWriter(
+            "/dummy/root_dir", keys=("devset", "evalset")
         )
+        writer_fn = writer.as_result_processor(method=custom_write_to_tensorboard)
         writer_fn(random_test_data, state)
         custom_write_to_tensorboard.assert_called()
         for call in custom_write_to_tensorboard.call_args_list:
@@ -193,9 +194,10 @@ class EvalResultsPublisherTest(chex.TestCase):
         custom_write_to_tensorboard.reset_mock()
         process_index_mock.return_value = 0
         process_count_mock.return_value = 4
-        writer_fn = tensorboard.make_eval_results_writer(
-            "/dummy/root_dir", method=custom_write_to_tensorboard
+        writer = tensorboard.MultiDirectorySummaryWriter(
+            "/dummy/root_dir", keys=("devset", "evalset")
         )
+        writer_fn = writer.as_result_processor(method=custom_write_to_tensorboard)
         writer_fn(random_test_data, state)
         custom_write_to_tensorboard.assert_called()
         for call in custom_write_to_tensorboard.call_args_list:
@@ -206,16 +208,89 @@ class EvalResultsPublisherTest(chex.TestCase):
         custom_write_to_tensorboard.reset_mock()
         process_index_mock.return_value = 1
         process_count_mock.return_value = 4
-        writer_fn = tensorboard.make_eval_results_writer(
+        writer = tensorboard.MultiDirectorySummaryWriter(
             "/dummy/root_dir",
-            method=custom_write_to_tensorboard,
-            write_from_all_processes=True,
+            keys=("devset", "evalset"),
+            only_from_leader_process=False,
         )
+        writer_fn = writer.as_result_processor(method=custom_write_to_tensorboard)
         writer_fn(random_test_data, state)
         custom_write_to_tensorboard.assert_called()
         for call in custom_write_to_tensorboard.call_args_list:
             unused_results, unused_train_state, writer = call.args
             np.testing.assert_(isinstance(writer, _SummaryWriterOriginal))
+
+    def test_dispatch(self):
+        # This is in fact an unexported/ unused feature, but developed for
+        # cleaner API.
+        writer = tensorboard.MultiDirectorySummaryWriter(
+            "/dummy/root_dir", keys=("sub1", "sub2")
+        )
+
+        def reset():
+            for s in ("sub1", "sub2"):
+                writer.subwriter(s).reset_mock()
+
+        writer.close()
+        writer.subwriter("sub1").close.assert_called_once()
+        writer.subwriter("sub2").close.assert_called_once()
+        reset()
+
+        writer.flush()
+        writer.subwriter("sub1").flush.assert_called_once()
+        writer.subwriter("sub2").flush.assert_called_once()
+        reset()
+
+        hparams = dict(x=3, y=2)
+        writer.hparams(hparams)
+        writer.subwriter("sub1").hparams.assert_called_once_with(hparams)
+        writer.subwriter("sub2").hparams.assert_called_once_with(hparams)
+        reset()
+
+        writer.scalar("sub1/some/value", 1.23, 234)
+        writer.subwriter("sub1").scalar.assert_called_once_with("some/value", 1.23, 234)
+        writer.subwriter("sub2").scalar.assert_not_called()
+        reset()
+
+        with np.testing.assert_raises(ValueError):
+            writer.scalar("sub3/some/value", 1.23, 234)
+        reset()
+
+        image = np.random.normal(size=(3, 3))
+        writer.image("sub2/nice/image", image, 234, max_outputs=1)
+        writer.subwriter("sub1").image.assert_not_called()
+        writer.subwriter("sub2").image.assert_called_once_with(
+            "nice/image", image, 234, max_outputs=1
+        )
+        reset()
+
+        audio = np.random.normal(size=(13,))
+        writer.audio("sub1/good/audio", audio, 234)
+        writer.subwriter("sub1").audio.assert_called_once_with(
+            "good/audio", audio, 234, sample_rate=44100, max_outputs=3
+        )
+        writer.subwriter("sub2").audio.assert_not_called()
+        reset()
+
+        values = np.random.normal(size=(13,))
+        writer.histogram("sub1/histo_gram/__", values, 456)
+        writer.subwriter("sub1").histogram.assert_called_once_with(
+            "histo_gram/__", values, 456, bins=None
+        )
+        writer.subwriter("sub2").histogram.assert_not_called()
+        reset()
+
+        writer.text("sub1/text", "hello", 234)
+        writer.subwriter("sub1").text.assert_called_once_with("text", "hello", 234)
+        writer.subwriter("sub2").text.assert_not_called()
+        reset()
+
+        writer.write("sub2/array", image, 234, metadata=audio)
+        writer.subwriter("sub1").write.assert_not_called()
+        writer.subwriter("sub2").write.assert_called_once_with(
+            "array", image, 234, metadata=audio
+        )
+        reset()
 
 
 @mock.patch("logging.log")

@@ -42,10 +42,11 @@ import jax
 
 from .pytypes import Batch
 from .tensorboard import publish_train_intermediates
-from .tensorboard import make_eval_results_writer
+from .tensorboard import MultiDirectorySummaryWriter
 from .training import TrainState as BobbinTrainState
 from .training import StepInfo
 from .evaluation import EvalResults
+from .evaluation import EvalResultProcessorFn
 from .evaluation import EvalTask
 from .evaluation import eval_datasets
 from .var_util import read_pytree_json_file
@@ -158,8 +159,10 @@ class RunEval:
         self._result_processors = []
 
         if tensorboard_root_path is not None:
-            writers = make_eval_results_writer(tensorboard_root_path)
-            self.add_result_processor(writers)
+            writer = MultiDirectorySummaryWriter(
+                tensorboard_root_path, keys=eval_batch_gens.keys()
+            )
+            self.add_result_processor(writer.as_result_processor())
 
     def __call__(self, train_state: _TrainState, **unused_kwargs):
         if not isinstance(train_state, BobbinTrainState):
@@ -184,9 +187,7 @@ class RunEval:
     def and_keep_best_checkpoint(self, tune_on: str, dest_path: str):
         return RunEvalKeepBest(self, tune_on, dest_path)
 
-    def add_result_processor(
-        self, f: Callable[[dict[str, EvalResults], _TrainState], Any]
-    ):
+    def add_result_processor(self, f: EvalResultProcessorFn):
         self._result_processors.append(f)
         return self
 

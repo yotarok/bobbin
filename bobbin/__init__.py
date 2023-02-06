@@ -53,7 +53,6 @@ from .pytypes import BatchGen
 from .pytypes import Parameter
 from .pytypes import VarCollection
 
-from .tensorboard import make_eval_results_writer
 from .tensorboard import ImageSow
 from .tensorboard import MplImageSow
 from .tensorboard import NullSummaryWriter

@@ -74,7 +74,7 @@ class EvalResultsTest(chex.TestCase):
 
 
 class SumEvalTask(evaluation.EvalTask):
-    def create_eval_results(self):
+    def create_eval_results(self, unused_dataset_name):
         return SimpleTreeResults(value=0.0)
 
     def evaluate(self, batch: Batch) -> SimpleTreeResults:
@@ -93,7 +93,7 @@ class EvalTaskTest(chex.TestCase):
             np.ones(batch_shape) * 0.3,
             np.ones(batch_shape) * 0.4,
         ]
-        results = evaluation.eval_batches(eval_task, batches)
+        results = evaluation.eval_batches(eval_task, "test", batches)
         assert isinstance(results, SimpleTreeResults)
         np.testing.assert_allclose(results.value, 1.0 * np.prod(batch_shape))
 
@@ -107,7 +107,7 @@ class EvalTaskTest(chex.TestCase):
             np.ones((3, 3)) * 0.1,
         ]
         with self.assertRaises(TypeError):
-            evaluation.eval_batches(eval_task, batches)
+            evaluation.eval_batches(eval_task, "test", batches)
 
     def test_eval_datasets(self):
         batch_shape = (3, 3)
