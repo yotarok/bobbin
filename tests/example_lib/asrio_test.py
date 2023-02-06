@@ -72,6 +72,14 @@ class WpmTest(absltest.TestCase):
         ids = asrio.wpm_encode_sentence(vocab, "abba babba abab")
         np.testing.assert_equal(ids, [8, 6, 7, 5, 6, 8, 5])
 
+    def test_decode_sentence(self):
+        vocab_file = _make_test_vocab_file()
+        vocab = asrio.WpmVocab.load(vocab_file.name)
+
+        ids = [8, 6, 7, 5, 6, 8, 5]
+        text = asrio.wpm_decode_sentence(vocab, ids)
+        np.testing.assert_equal(text, "abba babba abab")
+
 
 # Computed with TF as `tf.signal.linear_to_mel_weight_matrix(8, 23)`.
 _REFERENCE_TF_MEL_WEIGHTS_23x8 = [
