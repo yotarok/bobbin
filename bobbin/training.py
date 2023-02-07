@@ -41,11 +41,9 @@ from .pytypes import Batch
 from .pytypes import Parameter
 from .pytypes import VarCollection
 
-_Device = Any
-_Array = chex.Array
-_ArrayTree = chex.ArrayTree
-_Scalar = chex.Scalar
-_PRNGKey = chex.PRNGKey
+ArrayTree = chex.ArrayTree
+Scalar = chex.Scalar
+PRNGKey = chex.PRNGKey
 
 
 class TrainState(flax.training.train_state.TrainState):
@@ -78,14 +76,14 @@ class StepInfo:
       loss_aux_out: Auxiliary output from the loss function.
     """
 
-    loss: _Scalar
+    loss: Scalar
     loss_aux_out: Any
 
 
-TrainingStepFn = Callable[[TrainState, Batch, _PRNGKey], Tuple[TrainState, StepInfo]]
-LossFnSideOutput = Tuple[VarCollection, _ArrayTree]  # mutated_vars and loss_aux
-LossFnResult = Tuple[_Scalar, LossFnSideOutput]
-ValueAndGradResult = Tuple[LossFnResult, _ArrayTree]
+TrainingStepFn = Callable[[TrainState, Batch, PRNGKey], Tuple[TrainState, StepInfo]]
+LossFnSideOutput = Tuple[VarCollection, ArrayTree]  # mutated_vars and loss_aux
+LossFnResult = Tuple[Scalar, LossFnSideOutput]
+ValueAndGradResult = Tuple[LossFnResult, ArrayTree]
 ValueAndGradFn = Callable[[Parameter, Batch], ValueAndGradResult]
 
 
@@ -96,8 +94,8 @@ def _split_and_apply_value_and_grad(
     *,
     split_steps: int,
     extra_vars: VarCollection,
-    prng_key: _PRNGKey,
-    step: chex.Scalar,
+    prng_key: PRNGKey,
+    step: Scalar,
 ) -> ValueAndGradResult:
     """Applies value_and_grad function to split batches and merges results.
 
@@ -164,7 +162,7 @@ class BaseTrainTask:
         batch: Batch,
         *,
         extra_vars: VarCollection,
-        prng_key: _PRNGKey,
+        prng_key: PRNGKey,
     ) -> LossFnResult:
         """Abstract method to be overridden for defining the loss function."""
         raise NotImplementedError()
@@ -179,7 +177,7 @@ class BaseTrainTask:
         def train_step_fn(
             train_state: TrainState,
             batch: Batch,
-            prng_key: _PRNGKey,
+            prng_key: PRNGKey,
         ) -> Tuple[TrainState, StepInfo]:
             if pmap_axis_name is not None:
                 try:
@@ -237,8 +235,8 @@ class BaseTrainTask:
         return train_step_fn
 
     def reduce_extra_vars(
-        self, colname: str, tree: _ArrayTree, *, axis_name: str
-    ) -> _ArrayTree:
+        self, colname: str, tree: ArrayTree, *, axis_name: str
+    ) -> ArrayTree:
         """Abstract method to be overridden for sync non-parameter variables."""
         return tree
 
@@ -302,8 +300,8 @@ class TrainTask(BaseTrainTask):
         return self._model
 
     def get_rng_dict(
-        self, rng_key: chex.PRNGKey, extra_keys: Iterable[str] = ()
-    ) -> Dict[str, chex.PRNGKey]:
+        self, rng_key: PRNGKey, extra_keys: Iterable[str] = ()
+    ) -> Dict[str, PRNGKey]:
         """
         Splits `rng_key` and returns rngs for each key specified in constructor.
 
@@ -317,7 +315,7 @@ class TrainTask(BaseTrainTask):
         return {key: rng for key, rng in zip(keys, rngs)}
 
     def _initialize_vars(
-        self, rng_key: chex.PRNGKey, compile_init: Optional[Callable] = None
+        self, rng_key: PRNGKey, compile_init: Optional[Callable] = None
     ) -> VarCollection:
         """Initializes the model variables."""
         if compile_init is None:
@@ -333,7 +331,7 @@ class TrainTask(BaseTrainTask):
 
     def initialize_train_state(
         self,
-        rng: chex.PRNGKey,
+        rng: PRNGKey,
         tx: optax.GradientTransformation,
         checkpoint_path: Union[str, bytes, os.PathLike, None] = None,
         compile_init: Optional[Callable] = None,

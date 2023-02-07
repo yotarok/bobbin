@@ -45,9 +45,9 @@ import bobbin
 from bobbin.example_lib import asrio
 from bobbin.example_lib import asrnn
 
-_Array = chex.Array
-_Batch = bobbin.Batch
-_VarCollection = bobbin.VarCollection
+Array = chex.Array
+Batch = bobbin.Batch
+VarCollection = bobbin.VarCollection
 
 
 _DEFAULT_WPM_VOCAB_URL = "https://raw.githubusercontent.com/tensorflow/lingvo/master/lingvo/tasks/asr/wpm_16k_librispeech.vocab"  # noqa: E501
@@ -212,8 +212,8 @@ class CtcAsrModel(nn.Module):
         self._classifier = nn.Dense(features=self.num_outputs)
 
     def __call__(
-        self, waveform: _Array, waveform_paddings: _Array, is_eval: bool = False
-    ) -> Tuple[_Array, _Array]:
+        self, waveform: Array, waveform_paddings: Array, is_eval: bool = False
+    ) -> Tuple[Array, Array]:
         features, feature_paddings = self._frontend(waveform, waveform_paddings)
         self.sow(
             "tensorboard",
@@ -250,9 +250,9 @@ class CtcAsrModel(nn.Module):
 
 @struct.dataclass
 class LossAuxOut:
-    logits: _Array
-    logit_paddings: _Array
-    per_sample_loss: _Array
+    logits: Array
+    logit_paddings: Array
+    per_sample_loss: Array
 
 
 class CtcAsrTask(bobbin.TrainTask):
@@ -276,7 +276,7 @@ class CtcAsrTask(bobbin.TrainTask):
 
     def compute_loss(
         self, params, batch, *, extra_vars, prng_key, step
-    ) -> Tuple[chex.Scalar, Tuple[_VarCollection, LossAuxOut]]:
+    ) -> Tuple[chex.Scalar, Tuple[VarCollection, LossAuxOut]]:
         model_vars = extra_vars.copy()
         # Update params, and clear tensorboard SoWs.
         model_vars.update(params=params, tensorboard=dict())
@@ -442,9 +442,7 @@ class EvalTask(bobbin.EvalTask):
         return EvalResults(start_time=time.time())
 
     @functools.partial(jax.jit, static_argnums=(0,), donate_argnums=(1,))
-    def predict(
-        self, batch: _Batch, model_vars: _VarCollection
-    ) -> Tuple[_Array, _Array]:
+    def predict(self, batch: Batch, model_vars: VarCollection) -> Tuple[Array, Array]:
         logits, logit_paddings = self.model.apply(
             model_vars, batch["speech"], batch["speech_paddings"], is_eval=True
         )
@@ -498,7 +496,7 @@ class EvalTask(bobbin.EvalTask):
     def parallel_predict(self, b, mvar):
         return self.predict(b, mvar)
 
-    def evaluate(self, batch: _Batch, model_vars: _VarCollection) -> EvalResults:
+    def evaluate(self, batch: Batch, model_vars: VarCollection) -> EvalResults:
         start_time = time.time()
         if batch is None:
             # This is only allowed when we are sure that there's no parallel
