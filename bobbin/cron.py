@@ -17,6 +17,7 @@
 from __future__ import annotations
 
 import abc
+import functools
 import logging
 import os
 import time
@@ -317,6 +318,15 @@ class PublishTrainingProgress:
         self.last_fired_step = train_state.step
 
 
+_SCHEDULE_ARG_PARSER = {
+    "step_interval": ForEachNSteps,
+    "at_step": AtNthStep,
+    "at_first_steps": functools.partial(AtFirstNSteps, of_process=False),
+    "at_first_steps_of_process": functools.partial(AtFirstNSteps, of_process=True),
+    "time_interval": ForEachTSeconds,
+}
+
+
 class CronTab:
     """Table that contains pairs of triggers and actions."""
 
@@ -328,23 +338,37 @@ class CronTab:
         action: Action,
         *,
         name: Optional[str] = None,
-        step_interval: Optional[int] = None,
-        at_step: Union[None, int, Iterable[int]] = None,
-        at_first_steps: Optional[int] = None,
-        at_first_steps_of_process: Optional[int] = None,
-        time_interval: Optional[float] = None,
+        **kwargs,
     ) -> CronTab:
+        """Schedules an action for the trigger specified via `kwargs`.
+
+        Args:
+          action: a function `f(train_state, ...)` that takes `TrainState` and
+            additional arguments specified in `CronTab.run`.
+          name: name for the registered action-trigger pair.
+          kwargs:
+            the following trigger specifiers are currently supported:
+              - `step_interval=N`: do action for each N-steps.
+              - `at_step=N` or `at_step=(N1, N2, ...)`: do action at N, N1, or
+                N2 steps
+              - `at_first_steps=N`: do action for the first N steps of training.
+              - `at_first_steps_of_process=N`: do action for the first N steps
+                since the current training process started.
+              - `time_interval=X`: do action if X (`float`) seconds passed since
+                the last action from this trigger is invoked.
+
+        Returns:
+          `self`. updated crontab.
+        """
         triggers = []
-        if step_interval is not None:
-            triggers.append(ForEachNSteps(step_interval))
-        if at_step is not None:
-            triggers.append(AtNthStep(at_step))
-        if at_first_steps is not None:
-            triggers.append(AtFirstNSteps(at_first_steps, of_process=False))
-        if at_first_steps_of_process is not None:
-            triggers.append(AtFirstNSteps(at_first_steps_of_process, of_process=True))
-        if time_interval is not None:
-            triggers.append(ForEachTSeconds(time_interval))
+
+        for argname, argvalue in kwargs.items():
+            if argname not in _SCHEDULE_ARG_PARSER:
+                raise TypeError(
+                    "`CronTag.schedule` got an unexpected keyword argument"
+                    f"'{argname}'"
+                )
+            triggers.append(_SCHEDULE_ARG_PARSER[argname](argvalue))
 
         trigger = None
         if len(triggers) == 0:
@@ -363,10 +387,17 @@ class CronTab:
         return self.add(name, trigger, action)
 
     def add(self, name: str, trigger: Trigger, action: Action) -> CronTab:
+        """Adds a trigger-action pair."""
         self._actions.append((name, trigger, action))
         return self
 
     def run(self, train_state: _TrainState, *args, **kwargs) -> Dict[str, Any]:
+        """Checks triggers and run the corresponding actions if needed.
+
+        Args:
+          train_state: current training state.
+          *args, **kwargs: extra parameters passed to the actions.
+        """
         results = dict()
         for name, trig, act in self._actions:
             if trig.check(train_state):
