@@ -61,7 +61,6 @@ from .tensorboard import ScalarSow
 
 from .training import BaseTrainTask
 from .training import initialize_train_state
-from .training import pmap_for_train_step
 from .training import TrainTask
 from .training import TrainState
 

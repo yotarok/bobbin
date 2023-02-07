@@ -271,7 +271,7 @@ def main(args: argparse.Namespace):
     init_train_state = train_state
     train_state = flax.jax_utils.replicate(train_state, jax.local_devices())
     eval_batch_gens = {dsname: ds.as_numpy_iterator for dsname, ds in eval_dss.items()}
-    train_step_fn = bobbin.pmap_for_train_step(jax.jit(task.make_training_step_fn()))
+    train_step_fn = task.make_training_step_fn().pmap("batch")
 
     train_writer = flax_tb.SummaryWriter(tensorboard_path / "train")
     bobbin.publish_trainer_env_info(train_writer, init_train_state)
