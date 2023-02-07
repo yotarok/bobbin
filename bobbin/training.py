@@ -14,9 +14,13 @@
 
 """Utilities for supporting implementation of training loop."""
 
+from __future__ import annotations
+
+
+import dataclasses
 import functools
 import os
-from typing import Any, Callable, Dict, Iterable, Mapping, Optional, Tuple, Union
+from typing import Any, Callable, Dict, Iterable, List, Mapping, Optional, Tuple, Union
 
 import chex
 from flax import linen as nn
@@ -32,9 +36,6 @@ import optax
 from .array_util import split_leading_axis
 
 from .pmap_util import assert_replica_integrity
-from .pmap_util import RngArg
-from .pmap_util import ShardArg
-from .pmap_util import ThruArg
 from .pmap_util import tpmap
 
 from .pytypes import Batch
@@ -153,6 +154,56 @@ def _split_and_apply_value_and_grad(
     return (loss, (mutated_vars, loss_aux)), grads
 
 
+@dataclasses.dataclass(frozen=True)
+class TrainingStepFnBuilder(TrainingStepFn):
+    """Lazy builder for training step function."""
+
+    raw_fn: TrainingStepFn
+    do_jit: bool = False
+    static_argnums: Tuple[int, ...] = ()
+    backend: Optional[str] = None
+    devices: Optional[List[chex.Device]] = None
+    donate_argnums: Tuple[int, ...] = ()
+    do_pmap: bool = False
+    pmap_axis_name: Optional[Any] = None
+
+    def pmap(self, axis_name: Any) -> TrainingStepFnBuilder:
+        return dataclasses.replace(self, do_pmap=True, pmap_axis_name=axis_name)
+
+    def jit(self) -> TrainingStepFnBuilder:
+        return dataclasses.replace(self, do_jit=True)
+
+    @property
+    @functools.lru_cache(maxsize=None)
+    def compiled_fn(self):
+        f = self.raw_fn
+        if self.do_pmap:
+            f = tpmap(
+                f,
+                axis_name=self.pmap_axis_name,
+                argtypes=["thru", "shard", "rng"],
+                devices=self.devices,
+                backend=self.backend,
+                donate_argnums=self.donate_argnums,
+            )
+        elif self.do_jit:
+            device = None
+            if self.devices:
+                device = self.devices[0]
+            f = jax.jit(
+                f,
+                static_argnums=self.static_argnums,
+                backend=self.backend,
+                device=device,
+                donate_argnums=self.donate_argnums,
+            )
+
+        return f
+
+    def __call__(self, *args, **kwargs):
+        return self.compiled_fn(*args, **kwargs)
+
+
 class BaseTrainTask:
     """Base class defining training task."""
 
@@ -171,7 +222,7 @@ class BaseTrainTask:
         self,
         pmap_axis_name: Optional[str] = "batch",
         split_steps: Optional[int] = None,
-    ) -> TrainingStepFn:
+    ) -> TrainingStepFnBuilder:
         """Creates training step function."""
 
         def train_step_fn(
@@ -232,7 +283,7 @@ class BaseTrainTask:
             return train_state, StepInfo(loss=loss, loss_aux_out=loss_aux)
 
         train_step_fn = jax.named_call(train_step_fn, name="train_step_fn")
-        return train_step_fn
+        return TrainingStepFnBuilder(train_step_fn)
 
     def reduce_extra_vars(
         self, colname: str, tree: ArrayTree, *, axis_name: str
@@ -380,12 +431,3 @@ def initialize_train_state(
         assert_replica_integrity(new_state, is_device_replicated=False)
 
     return new_state
-
-
-def pmap_for_train_step(
-    train_step_fn: TrainingStepFn, axis_name="batch"
-) -> TrainingStepFn:
-    """Wraps `train_step_fn` with `pmap`."""
-    return tpmap(
-        train_step_fn, axis_name=axis_name, argtypes=[ThruArg(), ShardArg(), RngArg()]
-    )

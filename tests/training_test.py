@@ -122,7 +122,6 @@ class StepFunctionTest(chex.TestCase):
             np.asarray(next_train_state.step).tolist(), train_state.step + 1
         )
 
-    @chex.variants(with_jit=True, without_jit=True)
     def test_pmap_training_step(self):
         dims = 5
         batch_size = 3 * jax.local_device_count()
@@ -134,8 +133,7 @@ class StepFunctionTest(chex.TestCase):
         train_state = flax.jax_utils.replicate(train_state, jax.local_devices())
 
         task = SgdMeanEstimation()
-        training_step_fn = task.make_training_step_fn()
-        training_step_fn = training.pmap_for_train_step(self.variant(training_step_fn))
+        training_step_fn = task.make_training_step_fn().pmap("batch")
 
         batch = np.random.normal(size=(batch_size, dims))
         next_train_state, step_info = training_step_fn(
@@ -150,7 +148,6 @@ class StepFunctionTest(chex.TestCase):
             np.mean(step_info.loss), np.mean((batch - 1.0) ** 2), atol=1e-5, rtol=1e-5
         )
 
-    @chex.variants(with_jit=True, without_jit=True)
     def test_pmap_split_step(self):
         nsteps = 7
 
@@ -164,8 +161,7 @@ class StepFunctionTest(chex.TestCase):
         train_state = flax.jax_utils.replicate(train_state, jax.local_devices())
 
         task = SgdMeanEstimation()
-        training_step_fn = task.make_training_step_fn(split_steps=nsteps)
-        training_step_fn = training.pmap_for_train_step(self.variant(training_step_fn))
+        training_step_fn = task.make_training_step_fn(split_steps=nsteps).pmap("batch")
 
         batch = np.random.normal(size=(batch_size, dims))
         next_train_state, step_info = training_step_fn(

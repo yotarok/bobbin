@@ -606,9 +606,9 @@ def main(args: argparse.Namespace):
         jax.random.PRNGKey(0), tx, checkpoint_path=all_checkpoint_path
     )
     train_state = flax.jax_utils.replicate(train_state, jax.local_devices())
-    train_step_fn = bobbin.pmap_for_train_step(
-        task.make_training_step_fn(split_steps=args.split_training_batch),
-    )
+    train_step_fn = task.make_training_step_fn(
+        split_steps=args.split_training_batch
+    ).pmap("batch")
 
     # init must be deterministic for multi-host training
     prng_key = jax.random.PRNGKey(jax.process_index() + 3)
