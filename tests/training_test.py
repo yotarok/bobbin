@@ -14,6 +14,8 @@
 """Tests for training.
 """
 
+import unittest
+
 from absl.testing import absltest
 import chex
 import flax
@@ -57,6 +59,8 @@ class TrainStateTest(chex.TestCase):
         train_state = flax.jax_utils.replicate(train_state, jax.local_devices())
         np.testing.assert_(train_state.is_replicated_for_pmap())
 
+
+class StepFunctionTest(chex.TestCase):
     @chex.variants(with_jit=True, without_jit=True)
     def test_single_training_step(self):
         dims = 5
@@ -142,6 +146,25 @@ class TrainStateTest(chex.TestCase):
 
         np.testing.assert_allclose(
             np.mean(step_info.loss), np.mean((batch - 1.0) ** 2), atol=1e-5, rtol=1e-5
+        )
+
+
+class TrainTaskTest(chex.TestCase):
+    def test_log_writer_creation(self):
+        stub_logger = "unused_logger_object"
+        loglevel = "unused_loglevel"
+        task = SgdMeanEstimation()
+        task.write_trainer_log = unittest.mock.MagicMock()
+        writer = task.make_log_writer(logger=stub_logger, loglevel=loglevel)
+
+        tx = optax.sgd(0.001)
+        train_state = training.initialize_train_state(
+            l2_distortion_loss, {"params": np.ones((3,))}, tx=tx
+        )
+        step_info = None
+        writer(train_state, step_info=step_info)
+        task.write_trainer_log.assert_called_once_with(
+            train_state, step_info=step_info, logger=stub_logger, loglevel=loglevel
         )
 
 

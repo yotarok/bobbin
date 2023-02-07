@@ -45,7 +45,6 @@ from .pytypes import Batch
 from .tensorboard import publish_train_intermediates
 from .tensorboard import MultiDirectorySummaryWriter
 from .training import TrainState as BobbinTrainState
-from .training import StepInfo
 from .evaluation import EvalResults
 from .evaluation import EvalResultProcessorFn
 from .evaluation import EvalTask
@@ -259,26 +258,6 @@ class SaveCheckpoint:
 
     def __call__(self, train_state: _TrainState, **unused_kwargs):
         checkpoints.save_checkpoint(self._dest_path, train_state, train_state.step)
-
-
-class WriteLog:
-    """Action that outputs logs regarding training state."""
-
-    def __init__(
-        self, *, level: int = logging.INFO, logger: Optional[logging.Logger] = None
-    ):
-        self.logger = logging.root if logger is None else logger
-        self.level = level
-
-    def __call__(
-        self, train_state: _TrainState, *, step_info: StepInfo, **unused_kwargs
-    ):
-        self.logger.log(
-            self.level,
-            "Training state @step=%d loss=%s",
-            int(train_state.step),
-            str(step_info.loss),
-        )
 
 
 class PublishTrainingProgress:

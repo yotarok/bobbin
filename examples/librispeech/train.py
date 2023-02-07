@@ -642,7 +642,7 @@ def main(args: argparse.Namespace):
             at_step=warmup,
         )
         crontab.schedule(
-            bobbin.WriteLog(), time_interval=30.0, at_first_steps_of_process=warmup
+            task.make_log_writer(), time_interval=30.0, at_first_steps_of_process=warmup
         )
         crontab.schedule(
             bobbin.PublishTrainingProgress(train_writer), step_interval=100

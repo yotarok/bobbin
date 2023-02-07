@@ -14,6 +14,7 @@
 
 """Utilities for supporting implementation of training loop."""
 
+import functools
 import os
 from typing import Any, Callable, Optional, Tuple, Union
 
@@ -23,6 +24,8 @@ from flax.training import checkpoints
 import flax.training.train_state
 import jax
 import jax.numpy as jnp
+import logging
+import numpy as np
 import optax
 
 from .array_util import split_leading_axis
@@ -237,6 +240,35 @@ class TrainTask:
     ) -> _ArrayTree:
         """Abstract method to be overridden for sync non-parameter variables."""
         return tree
+
+    def write_trainer_log(
+        self,
+        train_state: flax.training.train_state.TrainState,
+        *,
+        step_info: StepInfo,
+        logger: logging.Logger,
+        loglevel: int,
+    ):
+        """Abstract method to be overridden for custom logging output."""
+        # Note that mean can also work on scalars.
+        mean_loss = np.mean(step_info.loss)
+        logger.log(
+            loglevel,
+            "@step=%d, loss=%f",
+            int(train_state.step),
+            mean_loss,
+        )
+
+    def make_log_writer(
+        self, *, logger: Optional[logging.Logger] = None, loglevel: int = logging.INFO
+    ):
+        """Make logging action that can be registered in `CronTab`."""
+        if logger is None:
+            logger = logging.root
+
+        return functools.partial(
+            self.write_trainer_log, logger=logger, loglevel=loglevel
+        )
 
 
 def initialize_train_state(
