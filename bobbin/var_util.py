@@ -167,7 +167,7 @@ def summarize_shape(tree: chex.ArrayTree) -> str:
                 ret += visit_node(v, indent_level + 1)
         return ret
 
-    if isinstance(tree, chex.Array):
+    if hasattr(tree, "shape") and hasattr(tree, "dtype"):
         return metadata_to_str(tree)
 
     # normalize
