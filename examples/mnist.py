@@ -38,7 +38,7 @@ import tensorflow_datasets as tfds
 
 import bobbin
 
-_VarCollection = bobbin.VarCollection
+VarCollection = bobbin.VarCollection
 
 
 class CNNDenseClassifier(nn.Module):
@@ -168,10 +168,10 @@ class ClassificationTask(bobbin.TrainTask):
         params: bobbin.Parameter,
         batch: bobbin.Batch,
         *,
-        extra_vars: _VarCollection,
+        extra_vars: VarCollection,
         prng_key: chex.PRNGKey,
         step: chex.Scalar,
-    ) -> Tuple[chex.Scalar, Tuple[_VarCollection, LossAuxOut]]:
+    ) -> Tuple[chex.Scalar, Tuple[VarCollection, LossAuxOut]]:
         inputs, labels = batch
         model_vars = extra_vars.copy()
         model_vars.update(params=params, tensorboard=dict())
@@ -209,9 +209,7 @@ class EvalTask(bobbin.EvalTask):
         wrap_return=EvalResults.unshard_and_reduce,
     )
     @functools.partial(jax.jit, static_argnums=(0,), donate_argnums=(1,))
-    def evaluate(
-        self, batch: bobbin.Batch, model_vars: bobbin.VarCollection
-    ) -> EvalResults:
+    def evaluate(self, batch: bobbin.Batch, model_vars: VarCollection) -> EvalResults:
         inputs, labels = batch
         logits = self.model.apply(model_vars, inputs, is_eval=True)
         predicts = logits.argmax(axis=-1)

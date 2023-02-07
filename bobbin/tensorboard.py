@@ -38,10 +38,10 @@ from .var_util import flatten_with_paths
 from .var_util import summarize_shape
 from .var_util import total_dimensionality
 
-_ArrayTree = chex.ArrayTree
-_TrainState = flax.training.train_state.TrainState
+ArrayTree = chex.ArrayTree
+TrainState = flax.training.train_state.TrainState
 
-WriteEvalResultsFn = Callable[[EvalResults, _TrainState, flax_tb.SummaryWriter], None]
+WriteEvalResultsFn = Callable[[EvalResults, TrainState, flax_tb.SummaryWriter], None]
 
 
 class NullSummaryWriter:
@@ -251,7 +251,7 @@ class PublishableSow(metaclass=abc.ABCMeta):
         ...
 
 
-def _is_publishable_sow(node: _ArrayTree) -> bool:
+def _is_publishable_sow(node: ArrayTree) -> bool:
     return isinstance(node, PublishableSow)
 
 
@@ -318,7 +318,7 @@ class MplImageSow(PublishableSow):
 
 def publish_train_intermediates(
     writer: flax_tb.SummaryWriter,
-    tree: _ArrayTree,
+    tree: ArrayTree,
     step: int,
     *,
     prefix: str = "sow/",
@@ -353,7 +353,7 @@ def _format_argv():
 
 def publish_trainer_env_info(
     writer: flax_tb.SummaryWriter,
-    train_state: flax.training.TrainState,
+    train_state: TrainState,
     *,
     prefix: str = "trainer/diagnosis/",
     also_do_logging: bool = True,

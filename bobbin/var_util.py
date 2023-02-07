@@ -26,15 +26,13 @@ import jax.numpy as jnp
 import numpy as np
 
 
-_Array = chex.Array
-_ArrayTree = chex.ArrayTree
-_PRNGKey = chex.PRNGKey
-_Scalar = chex.Scalar
+Array = chex.Array
+ArrayTree = chex.ArrayTree
 
-_IsLeafFn = Callable[[Any], bool]
+IsLeafFn = Callable[[Any], bool]
 
 
-def _nested_structs_to_dicts(v: _ArrayTree) -> Dict[Any, Any]:
+def _nested_structs_to_dicts(v: ArrayTree) -> Dict[Any, Any]:
     return flax.serialization.to_state_dict(v)
 
 
@@ -43,12 +41,12 @@ def _is_supported_dict(a: Any) -> bool:
 
 
 def _nested_dicts_to_paths(
-    node: _ArrayTree,
+    node: ArrayTree,
     prefix: str = "",
     *,
     pathsep: str = "/",
     seq_index_prefix: str = "",
-) -> _ArrayTree:
+) -> ArrayTree:
     """Converts leaves in the nested leaves to the path names from the root node."""
     if _is_supported_dict(node):
         kwargs = dict()
@@ -60,8 +58,8 @@ def _nested_dicts_to_paths(
 
 
 def nested_vars_to_paths(
-    node: _ArrayTree, *, pathsep: str = "/", is_leaf: Optional[_IsLeafFn] = None
-) -> _ArrayTree:
+    node: ArrayTree, *, pathsep: str = "/", is_leaf: Optional[IsLeafFn] = None
+) -> ArrayTree:
     """Constructs a tree with the same structure but containing path names as leaves."""
     if is_leaf is not None:
         # Fill placeholder in the places of deemed leaves for mimicking
@@ -77,8 +75,8 @@ def nested_vars_to_paths(
 
 
 def flatten_with_paths(
-    node: _ArrayTree, *, is_leaf: Optional[_IsLeafFn] = None
-) -> Iterator[Tuple[str, _Array]]:
+    node: ArrayTree, *, is_leaf: Optional[IsLeafFn] = None
+) -> Iterator[Tuple[str, Array]]:
     """Returns an iterator for leaves in the tree and their paths."""
     paths = nested_vars_to_paths(node, is_leaf=is_leaf)
     paths, unused_treedef = jax.tree_util.tree_flatten(paths)
@@ -111,41 +109,39 @@ class _ArrayEncoder(json.JSONEncoder):
 
 
 def dump_pytree_json(
-    tree: chex.ArrayTree,
+    tree: ArrayTree,
 ) -> str:
     return json.dumps(flax.serialization.to_state_dict(tree), cls=_ArrayEncoder)
 
 
-def write_pytree_json_file(path: Union[str, os.PathLike], tree: chex.ArrayTree) -> None:
+def write_pytree_json_file(path: Union[str, os.PathLike], tree: ArrayTree) -> None:
     epath.Path(path).write_text(dump_pytree_json(tree))
 
 
-def parse_pytree_json(
-    json_str: Union[bytes, str], template: chex.ArrayTree
-) -> chex.ArrayTree:
+def parse_pytree_json(json_str: Union[bytes, str], template: ArrayTree) -> ArrayTree:
     state_dict = json.loads(json_str, object_hook=_json_object_hook_for_arrays)
     return flax.serialization.from_state_dict(template, state_dict)
 
 
 def read_pytree_json_file(
-    path: Union[str, os.PathLike], template: chex.ArrayTree
-) -> Optional[chex.ArrayTree]:
+    path: Union[str, os.PathLike], template: ArrayTree
+) -> Optional[ArrayTree]:
     json = epath.Path(path).read_text()
     return parse_pytree_json(json, template)
 
 
-def total_dimensionality(tree: chex.ArrayTree) -> int:
+def total_dimensionality(tree: ArrayTree) -> int:
     """Returns total dimensionality of the variables in the given tree."""
     return jax.tree_util.tree_reduce(
         lambda n, arr: n + np.product(np.asarray(arr).shape), tree, 0
     )
 
 
-def summarize_shape(tree: chex.ArrayTree) -> str:
+def summarize_shape(tree: ArrayTree) -> str:
     """Returns a string that summarizes shapes and dtypes of the tree."""
     indent_width = 2
 
-    def metadata_to_str(x: chex.Array):
+    def metadata_to_str(x: Array):
         return f"{str(x.shape)} dtype={str(x.dtype)}"
 
     def visit_node(subtree, indent_level: int):

@@ -68,6 +68,7 @@ def split_leading_axis(
 def flatten_leading_axes(
     tree: chex.ArrayTree, num_leading_axes: int = 2
 ) -> chex.ArrayTree:
+    """Squashes the first `num_leading_axes` dimensions of arrays in the tree."""
     return jax.tree_util.tree_map(
         lambda x: x.reshape((-1,) + x.shape[num_leading_axes:]), tree
     )

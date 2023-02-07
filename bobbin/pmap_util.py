@@ -26,10 +26,10 @@ from .pytypes import Device
 from .array_util import split_leading_axis
 from .var_util import nested_vars_to_paths
 
-_ArrayTree = chex.ArrayTree
+ArrayTree = chex.ArrayTree
 
 
-def pmap_shard_tree(x: _ArrayTree, ndevices: int) -> _ArrayTree:
+def pmap_shard_tree(x: ArrayTree, ndevices: int) -> ArrayTree:
     """Reshapes `(N, ...)`-arrays in the tree into `(ndevices, N // ndevices, ...)`."""
     return split_leading_axis(
         ndevices, x, leading_axis_name="batch size", split_group_name="# of devices"
@@ -40,7 +40,7 @@ class ArgType(metaclass=abc.ABCMeta):
     """Description for arguments passed to function obtained by `tpmap`."""
 
     @abc.abstractmethod
-    def transform(self, x: _ArrayTree, devices: Sequence[Device]):
+    def transform(self, x: ArrayTree, devices: Sequence[Device]):
         ...
 
     def is_static(self):
@@ -50,7 +50,7 @@ class ArgType(metaclass=abc.ABCMeta):
 class StaticArg(ArgType):
     """`ArgType` for static args."""
 
-    def transform(self, x: _ArrayTree, devices: Sequence[Device]):
+    def transform(self, x: ArrayTree, devices: Sequence[Device]):
         return x
 
     def is_static(self):
@@ -60,28 +60,28 @@ class StaticArg(ArgType):
 class ThruArg(ArgType):
     """`ArgType` for preprocessed args. No wrapper applied to args with this type."""
 
-    def transform(self, x: _ArrayTree, devices: Sequence[Device]):
+    def transform(self, x: ArrayTree, devices: Sequence[Device]):
         return x
 
 
 class BroadcastArg(ArgType):
     """`ArgType` for args to be broadcasted."""
 
-    def transform(self, x: _ArrayTree, devices: Sequence[Device]):
+    def transform(self, x: ArrayTree, devices: Sequence[Device]):
         return flax.jax_utils.replicate(x, devices)
 
 
 class ShardArg(ArgType):
     """`ArgType` for args to be sharded and distributed over devices."""
 
-    def transform(self, x: _ArrayTree, devices: Sequence[Device]):
+    def transform(self, x: ArrayTree, devices: Sequence[Device]):
         return pmap_shard_tree(x, len(devices))
 
 
 class RngArg(ArgType):
     """`ArgType` for RNGs. The RNG args are split and distributed."""
 
-    def transform(self, x: _ArrayTree, devices: Sequence[Device]):
+    def transform(self, x: ArrayTree, devices: Sequence[Device]):
         ndevices = len(devices)
         rngs = list(jax.random.split(x, num=ndevices))
         rngs = jax.device_put_sharded(rngs, devices)
@@ -120,7 +120,7 @@ def tpmap(
     *,
     devices: Optional[Device] = None,
     backend: Optional[Backend] = None,
-    wrap_return: Optional[Callable[[_ArrayTree], _ArrayTree]] = None,
+    wrap_return: Optional[Callable[[ArrayTree], ArrayTree]] = None,
     **kwargs,
 ) -> Callable:
     """Transparent pmap (tpmap).
@@ -192,7 +192,7 @@ def tpmap(
     return wrapped_f
 
 
-def unshard(tree: _ArrayTree) -> List[_ArrayTree]:
+def unshard(tree: ArrayTree) -> List[ArrayTree]:
     leaves = jax.tree_util.tree_leaves(tree)
     if not leaves:
         raise ValueError("PyTree to be unsharded is empty.")
@@ -202,7 +202,7 @@ def unshard(tree: _ArrayTree) -> List[_ArrayTree]:
     return [jax.tree_util.tree_map(lambda x: x[i], tree) for i in range(size)]
 
 
-def gather_from_jax_processes(v: _ArrayTree) -> List[_ArrayTree]:
+def gather_from_jax_processes(v: ArrayTree) -> List[ArrayTree]:
     """Gathers arbitrary trees from distributed processes."""
     repl_v = flax.jax_utils.replicate(v)  # repl_v has [local_dev,] leading axis
 
@@ -244,7 +244,7 @@ def _check_replica_integrity(x: chex.Array, path: str, rtol: float, atol: float)
 
 
 def assert_replica_integrity(
-    tree: _ArrayTree, *, is_device_replicated: bool = True, atol=1e-5, rtol=1e-5
+    tree: ArrayTree, *, is_device_replicated: bool = True, atol=1e-5, rtol=1e-5
 ) -> None:
     """Checks if replicas have exactly same values over devices and processes.
 

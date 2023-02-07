@@ -28,7 +28,7 @@ import jax.numpy as jnp
 import numpy as np
 import tensorflow as tf
 
-_Array = chex.Array
+Array = chex.Array
 
 # mel spectrum constants.
 _MEL_BREAK_FREQUENCY_HERTZ = 700.0
@@ -128,7 +128,7 @@ def wpm_decode_sentence(
     )
 
 
-def _hertz_to_mel(frequencies_hertz: Union[float, int, _Array]) -> _Array:
+def _hertz_to_mel(frequencies_hertz: Union[float, int, Array]) -> Array:
     """Convert hertz to mel."""
     return _MEL_HIGH_FREQUENCY_Q * np.log(
         1.0 + (frequencies_hertz / _MEL_BREAK_FREQUENCY_HERTZ)
@@ -145,12 +145,12 @@ def _pad_end_length(num_timesteps: int, frame_step: int, frame_size: int) -> int
 
 
 def frame(
-    x: _Array,
+    x: Array,
     frame_length: int,
     frame_step: int,
     pad_end: bool = False,
     pad_value: Union[int, float] = 0.0,
-) -> _Array:
+) -> Array:
     """Slides a window and extract values inside the window.
     ]
         This function extracts `x[:, n:n+frame_length, :]` with sliding `n` with
@@ -198,7 +198,7 @@ def linear_to_mel_weight_matrix(
     lower_edge_hertz: Union[int, float] = 125.0,
     upper_edge_hertz: Union[int, float] = 3800.0,
     dtype: Any = np.float32,
-) -> _Array:
+) -> Array:
     r"""Numpy-port of `tf.signal.linear_to_mel_weight_matrix`.
 
     Note that this function works purely on numpy because mel-weights are

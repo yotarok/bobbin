@@ -27,14 +27,12 @@ import numpy as np
 
 from bobbin.example_lib import asrio
 
-_Array = chex.Array
+Array = chex.Array
 ModuleDef = Any
-InitializerFn = Callable[[chex.PRNGKey, chex.Shape, chex.ArrayDType], _Array]
+InitializerFn = Callable[[chex.PRNGKey, chex.Shape, chex.ArrayDType], Array]
 
 
-def _input_padding_validation(
-    funcname: str, x: _Array, x_paddings: _Array
-) -> Tuple[int]:
+def _input_padding_validation(funcname: str, x: Array, x_paddings: Array) -> Tuple[int]:
     """Checks whether the leading axes of features and padding indicators match.
 
     Args:
@@ -102,7 +100,7 @@ class LogMelFilterBank(nn.Module):
         self._frame_size = stft_frame_size + 1
         self._fft_size = asrio.next_pow_of_two(stft_frame_size)
 
-    def _compute_feature_paddings(self, waveform_paddings: _Array) -> _Array:
+    def _compute_feature_paddings(self, waveform_paddings: Array) -> Array:
         return jax.lax.reduce_window(
             waveform_paddings,
             init_value=1.0,
@@ -112,15 +110,15 @@ class LogMelFilterBank(nn.Module):
             padding="valid",
         )
 
-    def _preemphasize(self, frames: _Array):
+    def _preemphasize(self, frames: Array):
         if self.preemph:
             return frames[..., 1:] - self.preemph * frames[..., :-1]
         else:
             return frames[..., :-1]
 
     def __call__(
-        self, waveform: _Array, waveform_paddings: _Array
-    ) -> Tuple[_Array, _Array]:
+        self, waveform: Array, waveform_paddings: Array
+    ) -> Tuple[Array, Array]:
         _input_padding_validation("LogMelFilterBank", waveform, waveform_paddings)
 
         waveform = waveform.astype(np.float32) * self.input_scale_factor
@@ -185,12 +183,12 @@ class CnnEncoder(nn.Module):
     @nn.compact
     def __call__(
         self,
-        features: _Array,
-        feature_paddings: _Array,
+        features: Array,
+        feature_paddings: Array,
         *,
         is_eval: Optional[bool] = None,
         batch_norm_axis_name: Optional[str] = None,
-    ) -> tuple[_Array, _Array]:
+    ) -> tuple[Array, Array]:
         _input_padding_validation("CnnEncoder", features, feature_paddings)
         is_eval = nn.merge_param("is_eval", self.is_eval, is_eval)
         if self.use_batch_norm:
@@ -253,12 +251,12 @@ class ConformerConvBlock(nn.Module):
     @nn.compact
     def __call__(
         self,
-        x: _Array,
-        x_paddings: _Array,
+        x: Array,
+        x_paddings: Array,
         deterministic: Optional[bool] = None,
         *,
         batch_norm_axis_name: Optional[str] = None,
-    ) -> _Array:
+    ) -> Array:
         _input_padding_validation("ConformerConvBlock", x, x_paddings)
         inputs = x
         deterministic = nn.merge_param(
@@ -308,7 +306,7 @@ class ConformerFfnBlock(nn.Module):
     deterministic: Optional[bool] = None
 
     @nn.compact
-    def __call__(self, x: _Array, deterministic: Optional[bool] = None) -> _Array:
+    def __call__(self, x: Array, deterministic: Optional[bool] = None) -> Array:
         inputs = x
         deterministic = nn.merge_param(
             "deterministic", deterministic, self.deterministic
@@ -327,7 +325,7 @@ class ConformerFfnBlock(nn.Module):
         return x
 
 
-def _paddings_to_mask(paddings: _Array) -> _Array:
+def _paddings_to_mask(paddings: Array) -> Array:
     """Converts padding indicators into mask patterns for attention."""
     *batch_sizes, time_steps = paddings.shape
     flat_batch_size = np.product(batch_sizes) if batch_sizes else 1
@@ -357,8 +355,8 @@ class ConformerMhsaBlock(nn.Module):
 
     @nn.compact
     def __call__(
-        self, x: _Array, x_paddings: _Array, deterministic: Optional[bool] = None
-    ) -> _Array:
+        self, x: Array, x_paddings: Array, deterministic: Optional[bool] = None
+    ) -> Array:
         _input_padding_validation("ConformerMhsaBlock", x, x_paddings)
         inputs = x
         deterministic = nn.merge_param(
@@ -412,8 +410,8 @@ class ConformerBlock(nn.Module):
 
     @nn.compact
     def __call__(
-        self, x: _Array, x_paddings: _Array, is_eval: Optional[bool] = None
-    ) -> Tuple[_Array, _Array]:
+        self, x: Array, x_paddings: Array, is_eval: Optional[bool] = None
+    ) -> Tuple[Array, Array]:
         _input_padding_validation("ConformerBlock", x, x_paddings)
         is_eval = nn.merge_param("is_eval", is_eval, self.is_eval)
 
@@ -451,9 +449,9 @@ def _build_1d_masks(
     target_length: int,
     multiplicity: int,
     *,
-    widths: Union[int, _Array],
-    limits: Optional[Union[int, _Array]] = None,
-) -> _Array:
+    widths: Union[int, Array],
+    limits: Optional[Union[int, Array]] = None,
+) -> Array:
     rng_for_loc, rng_for_width = jax.random.split(rng)
     if limits is None:
         limits = target_length
@@ -494,11 +492,11 @@ class SpecAug(nn.Module):
 
     def __call__(
         self,
-        inputs: _Array,
-        paddings: Optional[_Array] = None,
+        inputs: Array,
+        paddings: Optional[Array] = None,
         *,
         deterministic: Optional[bool] = None,
-    ) -> _Array:
+    ) -> Array:
         deterministic = nn.merge_param(
             "deterministic", deterministic, self.deterministic
         )
@@ -538,7 +536,7 @@ class SpecAug(nn.Module):
         return x
 
 
-def sinusoidal_positional_embeddings(timesteps: int, dims: int) -> _Array:
+def sinusoidal_positional_embeddings(timesteps: int, dims: int) -> Array:
     """Returns positional embeddings."""
 
     positions = np.arange(0, timesteps)[:, np.newaxis]
@@ -573,8 +571,8 @@ class CnnConformerEncoder(nn.Module):
 
     @nn.compact
     def __call__(
-        self, features: _Array, feature_paddings: _Array, is_eval: Optional[bool]
-    ) -> Tuple[_Array, _Array]:
+        self, features: Array, feature_paddings: Array, is_eval: Optional[bool]
+    ) -> Tuple[Array, Array]:
         is_eval = nn.merge_param("is_eval", self.is_eval, is_eval)
         _input_padding_validation("CnnConformerEncoder", features, feature_paddings)
 
@@ -617,8 +615,8 @@ def _abs_sq(x):
 # This function is adapted from flax.linen.normalization and modified for adding
 # padding support.
 def _compute_stats_with_mask(
-    x: _Array,
-    mask: _Array,
+    x: Array,
+    mask: Array,
     axes: Any,
     dtype: Optional[chex.ArrayDType],
     axis_name: Optional[str] = None,
@@ -650,9 +648,9 @@ def _compute_stats_with_mask(
 # This function is copied from flax.linen.normalization.
 def _normalize(
     mdl: nn.Module,
-    x: _Array,
-    mean: _Array,
-    var: _Array,
+    x: Array,
+    mean: Array,
+    var: Array,
     reduction_axes: Any,
     feature_axes: Any,
     dtype: chex.ArrayDType,
@@ -745,8 +743,8 @@ class PaddedBatchNorm(nn.Module):
     @nn.compact
     def __call__(
         self,
-        x: _Array,
-        x_paddings: _Array,
+        x: Array,
+        x_paddings: Array,
         use_running_average: Optional[bool] = None,
     ):
         use_running_average = nn.merge_param(
