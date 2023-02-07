@@ -16,10 +16,10 @@
 from __future__ import annotations
 
 import abc
+import functools
 import logging
-import os
 import sys
-from typing import Callable, Dict, Optional, Union
+from typing import Callable, Dict, Iterable, Optional, Tuple
 
 import chex
 from etils import epath
@@ -33,12 +33,15 @@ import numpy as np
 
 from .training import TrainState as BobbinTrainState
 from .evaluation import EvalResults
+from .evaluation import EvalResultProcessorFn
 from .var_util import flatten_with_paths
 from .var_util import summarize_shape
 from .var_util import total_dimensionality
 
 _ArrayTree = chex.ArrayTree
 _TrainState = flax.training.train_state.TrainState
+
+WriteEvalResultsFn = Callable[[EvalResults, _TrainState, flax_tb.SummaryWriter], None]
 
 
 class NullSummaryWriter:
@@ -70,6 +73,176 @@ class NullSummaryWriter:
 
     def hparams(self, *args, **kwargs):
         pass
+
+    def as_result_processor(self, *args, **kwargs):
+        def f(*args, **kwargs):
+            pass
+
+        return f
+
+
+def _default_key_from_tag(tag: str) -> str:
+    key, rest = tag.split("/", maxsplit=1)
+    return key, rest
+
+
+def _default_dirname_from_key(key: str) -> str:
+    return key
+
+
+class MultiDirectorySummaryWriter(flax_tb.SummaryWriter):
+    """SummaryWriter that changes the destination depending on the tag.
+
+    Note that this class is currently not exposed to users, and there's no
+    actual usecases for wrapping functions like `scalar`.
+    """
+
+    _writers: Dict[str, flax_tb.SummaryWriter]
+    _key_fn: Callable[[str], Tuple[str, str]]
+    _dirname_fn: Callable[[str], str]
+
+    def __init__(
+        self,
+        log_dir_root,
+        *,
+        keys: Iterable[str] = (),
+        allow_new_keys: bool = True,
+        only_from_leader_process: bool = True,
+        auto_flush: bool = True,
+        tag_to_key: Callable[[str], str] = _default_key_from_tag,
+        dirname: Callable[[str], str] = _default_dirname_from_key,
+    ):
+        """Constructs `MultiDirectorySummaryWriter`.
+
+        Args:
+          log_dir_root: root directory for this `MultiDirectorySummaryWriter`.
+            it can be anything that can be passed to `epath.Path`.
+          keys: pre-specified set of keys.
+          only_on_leader_process: if True, (by default), writers do not
+            actually write summaries in the processes with
+            `jax.process_index() != 0`.
+          auto_flush: if True, sub-writers are instantiated with
+            `auto_flush=True` argument.
+          tag_to_key: a function that extracts subwriter names and tag names
+            used in the subwriter from the tags. default is a function
+            equivalent to `lambda s: s.split('/', maxsplit=1)`.
+          dirname: a function that converts keys to the directory names under
+            the root directory.
+        """
+        self._log_dir_root = epath.Path(log_dir_root)
+        self._key_fn = tag_to_key
+        self._dirname_fn = dirname
+        self._auto_flush = auto_flush
+        self._use_null = only_from_leader_process and jax.process_index() != 0
+
+        self._writers = dict()
+        # Instantiate writers for pre-specified keys
+        self._allow_new_keys = True
+        for key in keys:
+            self.subwriter(key)
+        self._allow_new_keys = False  # It is forbidden once
+
+    def subwriter(self, key: str) -> flax_tb.SummaryWriter:
+        """Returns summary writer corresponding to the specific key.
+
+        This function creates an instance of SummaryWriter if it is not created
+        yet.
+
+        Args:
+          key: name of the subwriter.
+
+        Returns:
+          an instance of `SummaryWriter`.
+        """
+        if key not in self._writers:
+            if self._allow_new_keys:
+                if self._use_null:
+                    writer = NullSummaryWriter()
+                else:
+                    writer = flax_tb.SummaryWriter(
+                        self._log_dir_root / self._dirname_fn(key),
+                        auto_flush=self._auto_flush,
+                    )
+                self._writers[key] = writer
+            else:
+                raise ValueError(
+                    "Subwriter for `MultiDirectorySummaryWriter` with "
+                    f"key={key} is requested but this instance is configured "
+                    "to have only the pre-specified keys "
+                    f"{list(self._writers.keys())}"
+                )
+        return self._writers[key]
+
+    @functools.wraps(flax_tb.SummaryWriter.close)
+    def close(self):
+        for unused_name, writer in self._writers.items():
+            writer.close()
+
+    @functools.wraps(flax_tb.SummaryWriter.flush)
+    def flush(self):
+        for unused_name, writer in self._writers.items():
+            writer.flush()
+
+    def _find_writer_by_tag(self, tag: str) -> flax_tb.SummaryWriter:
+        key, tag = self._key_fn(tag)
+        return self.subwriter(key), tag
+
+    @functools.wraps(flax_tb.SummaryWriter.scalar)
+    def scalar(self, tag, value, step):
+        writer, tag = self._find_writer_by_tag(tag)
+        writer.scalar(tag, value, step)
+
+    @functools.wraps(flax_tb.SummaryWriter.image)
+    def image(self, tag, image, step, max_outputs=3):
+        writer, tag = self._find_writer_by_tag(tag)
+        writer.image(tag, image, step, max_outputs=max_outputs)
+
+    @functools.wraps(flax_tb.SummaryWriter.audio)
+    def audio(self, tag, audiodata, step, sample_rate=44100, max_outputs=3):
+        writer, tag = self._find_writer_by_tag(tag)
+        writer.audio(
+            tag, audiodata, step, sample_rate=sample_rate, max_outputs=max_outputs
+        )
+
+    @functools.wraps(flax_tb.SummaryWriter.histogram)
+    def histogram(self, tag, values, step, bins=None):
+        writer, tag = self._find_writer_by_tag(tag)
+        writer.histogram(tag, values, step, bins=bins)
+
+    @functools.wraps(flax_tb.SummaryWriter.text)
+    def text(self, tag, textdata, step):
+        writer, tag = self._find_writer_by_tag(tag)
+        writer.text(tag, textdata, step)
+
+    @functools.wraps(flax_tb.SummaryWriter.write)
+    def write(self, tag, tensor, step, metadata=None):
+        writer, tag = self._find_writer_by_tag(tag)
+        writer.write(tag, tensor, step, metadata=metadata)
+
+    @functools.wraps(flax_tb.SummaryWriter.hparams)
+    def hparams(self, hparams):
+        for unused_name, writer in self._writers.items():
+            writer.hparams(hparams)
+
+    def as_result_processor(
+        self, method: Optional[WriteEvalResultsFn] = None
+    ) -> EvalResultProcessorFn:
+        """Returns the function that writes eval results to TensorBoard.
+
+        This method is for connecting `MultiDirectorySummaryWriter` to
+        `crontab.RunEval`.
+        """
+
+        def f(result_per_dataset: Dict[str, EvalResults], train_state):
+            for dataset_name, result in result_per_dataset.items():
+                writer = self.subwriter(dataset_name)
+                if method is None:
+                    result.write_to_tensorboard(train_state, writer)
+                else:
+                    method(result, train_state, writer)
+                writer.flush()
+
+        return f
 
 
 class PublishableSow(metaclass=abc.ABCMeta):
@@ -232,54 +405,3 @@ def publish_trainer_env_info(
 
     process = f"Number of processes = {jax.process_count()}"
     write_text(prefix + "process", process)
-
-
-_EvalResultsWriteFn = Callable[[EvalResults, _TrainState, flax_tb.SummaryWriter], None]
-
-
-def make_eval_results_writer(
-    summary_root_dir: Union[str, os.PathLike[str]],
-    dataset_filter: Optional[set[str]] = None,
-    method: Optional[_EvalResultsWriteFn] = None,
-    write_from_all_processes: bool = False,
-) -> Callable[[dict[str, EvalResults], _TrainState], None]:
-    """Makes a function that publishes evaluation results from different datasets.
-
-    Args:
-        summary_root_dir: Root directory for summaries.
-        dataset_filter: If set, only the results from datasets in `dataset_filter`
-            will be processed.
-        method: If set, use `method(results, train_state, writer)` to publish the
-            evaluation results `results`. Otherwise, `results.write_to_tensorboard`
-            will be used.
-        write_from_all_processes: If False (default), only the first process of
-            the distributed workers calls `write_to_tensorboard` (or `method`).
-
-    Returns:
-        A function `tb_writer(results, state)` where `results` is
-        `Dict[str, EvalResults]` where `results[name]` represents the evaluation
-        result for the dataset with `name`.  Instances of `EvalResults` passed
-        to this function must override`EvalResults.write_to_tensorboard` method.
-        `state` is a `TrainState`.
-    """
-    summary_root_dir = epath.Path(summary_root_dir)
-    writers = dict()
-
-    def _tb_writer(res: Dict[str, EvalResults], st: _TrainState):
-        for name, result in res.items():
-            if dataset_filter is not None and name not in dataset_filter:
-                continue
-            if name not in writers:
-                should_write = jax.process_index() == 0 or write_from_all_processes
-                writers[name] = (
-                    flax_tb.SummaryWriter(summary_root_dir / name)
-                    if should_write
-                    else NullSummaryWriter()
-                )
-            if method is None:
-                result.write_to_tensorboard(st, writers[name])
-            else:
-                method(result, st, writers[name])
-            writers[name].flush()
-
-    return _tb_writer

@@ -394,7 +394,9 @@ class EvalResults(bobbin.EvalResults):
         return self.word_error.error_rate < other.word_error.error_rate
 
     def write_to_tensorboard(
-        self, current_train_state: bobbin.TrainState, writer: flax_tb.SummaryWriter
+        self,
+        current_train_state: bobbin.TrainState,
+        writer: flax_tb.SummaryWriter,
     ) -> None:
         step = current_train_state.step
         _write_error_to_tensorboard(self.token_error, writer, "token", step, "eval/")
@@ -417,7 +419,7 @@ class EvalTask(bobbin.EvalTask):
         self.model = model
         self.wpm_vocab = wpm_vocab
 
-    def create_eval_results(self):
+    def create_eval_results(self, unused_dataset_name):
         return EvalResults(start_time=time.time())
 
     @functools.partial(jax.jit, static_argnums=(0,), donate_argnums=(1,))

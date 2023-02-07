@@ -19,7 +19,7 @@ from __future__ import annotations
 
 import collections
 import logging
-from typing import Dict, Generic, Iterable, Iterator, Tuple, TypeVar
+from typing import Any, Callable, Dict, Generic, Iterable, Iterator, Tuple, TypeVar
 
 from flax import struct
 from flax.metrics import tensorboard as flax_tb
@@ -72,7 +72,9 @@ class EvalResults:
         )
 
     def write_to_tensorboard(
-        self, current_train_state: TrainState, writer: flax_tb.SummaryWriter
+        self,
+        current_train_state: TrainState,
+        writer: flax_tb.SummaryWriter,
     ):
         """Writes summary of this `EvalResults` to `writer`.
 
@@ -81,8 +83,8 @@ class EvalResults:
         in this function, you can keep this unimplemented.
 
         Args:
-            current_train_state: TrainState used to obtain this `EvalResults`.
-            writer: Destination `SummaryWriter`.
+            current_train_state: `TrainState` used to obtain this `EvalResults`.
+            writer: destination `SummaryWriter`.
         """
         raise NotImplementedError(
             "`EvalResults` is instructed to publish to TensorBoard."
@@ -91,10 +93,13 @@ class EvalResults:
         )
 
 
+EvalResultProcessorFn = Callable[[Dict[str, EvalResults], TrainState], Any]
+
+
 class EvalTask:
     """Base class defining evaluation task."""
 
-    def create_eval_results(self) -> EvalResults:
+    def create_eval_results(self, dataset_name: str) -> EvalResults:
         """Initializes evaluation result."""
         raise NotImplementedError()
 
@@ -103,17 +108,22 @@ class EvalTask:
         raise NotImplementedError()
 
     def finalize_eval_results(self, metrics: EvalResults) -> EvalResults:
+        """
+        Finalize eval metrics before it is stored or published to tensorboard.
+        """
         return metrics
 
 
 def eval_batches(
-    eval_task: EvalTask, batches: Iterable[Batch], *args, **kwargs
+    eval_task: EvalTask, dataset_name: str, batches: Iterable[Batch], *args, **kwargs
 ) -> EvalResults:
     """Evaluates the batches provided by the given iterator.
 
     Args:
       eval_task: `EvalTask` object for initializing evaluation results and
         running evaluation.
+      dataset_name: the name of dataset to be evaluated over. this will be
+        passed to `EvalTask.create_eval_results`.
       batch_gens: A dictionary containing pairs of dataset names and a nullary
         function that returns iterable of batches.
       *args, **kwargs: additional variable such as model variables. Those are
@@ -122,7 +132,7 @@ def eval_batches(
     Returns:
       `EvalResult` for the given batches.
     """
-    metrics = eval_task.create_eval_results()
+    metrics = eval_task.create_eval_results(dataset_name)
     batches = iter(batches)
 
     multi_process = jax.process_count() > 1
@@ -186,6 +196,7 @@ def eval_datasets(
         logging.info("Start evaluation process over %s", dsname)
         results[dsname] = eval_batches(
             eval_task,
+            dsname,
             batch_gen(),
             *args,
             **kwargs,

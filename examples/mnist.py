@@ -139,7 +139,9 @@ class EvalResults(bobbin.EvalResults):
         return self.accuracy > other.accuracy
 
     def write_to_tensorboard(
-        self, current_train_state: bobbin.TrainState, writer: flax_tb.SummaryWriter
+        self,
+        current_train_state: bobbin.TrainState,
+        writer: flax_tb.SummaryWriter,
     ) -> None:
         step = current_train_state.step
         writer.scalar("accuracy", self.accuracy, step=step)
@@ -192,7 +194,7 @@ class EvalTask(bobbin.EvalTask):
     def __init__(self, model: nn.Module):
         self.model = model
 
-    def create_eval_results(self):
+    def create_eval_results(self, unused_dataset_name: str):
         return EvalResults(correct_count=0, predict_count=0, sum_logprobs=0.0)
 
     @functools.partial(
