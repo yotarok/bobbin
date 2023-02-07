@@ -320,29 +320,17 @@ class EvalResults(bobbin.EvalResults):
     char_error: asrio.SequenceError = struct.field(default_factory=asrio.SequenceError)
     num_sentences: int = 0
     num_sentence_errors: int = 0
-    start_time: Optional[float] = None
-    end_time: Optional[float] = None
+    start_time: float = np.inf
+    end_time: float = 0
     sampled_results: bobbin.SampledSet[Tuple[str, str]] = struct.field(
         pytree_node=False, default=bobbin.SampledSet(max_size=3)
     )
 
-    _sum_fields: Sequence[str] = struct.field(
-        pytree_node=False,
-        default=(
-            "token_error",
-            "word_error",
-            "char_error",
-            "num_sentences",
-            "num_sentence_errors",
-        ),
-    )
-
     @property
     def wall_time(self) -> Optional[float]:
-        if self.start_time is None or self.end_time is None:
-            return None
-        assert self.end_time > self.start_time
-        return self.end_time - self.start_time
+        return (
+            None if self.start_time > self.end_time else self.end_time - self.start_time
+        )
 
     @property
     def sentences_per_second(self) -> Optional[float]:
@@ -373,20 +361,21 @@ class EvalResults(bobbin.EvalResults):
 
     def reduce(self, other: EvalResults) -> EvalResults:
         kwargs = dict()
-        for key in self._sum_fields:
+        for key in (
+            "token_error",
+            "word_error",
+            "char_error",
+            "num_sentences",
+            "num_sentence_errors",
+        ):
             kwargs[key] = jax.tree_util.tree_map(
                 lambda x, y: x + y, getattr(self, key), getattr(other, key)
             )
 
-        if self.start_time is None or other.start_time is None:
-            start_time = self.start_time or other.start_time
-        else:
-            start_time = min(self.start_time, other.start_time)
-        if self.end_time is None or other.end_time is None:
-            end_time = self.end_time or other.end_time
-        else:
-            end_time = max(self.end_time, other.end_time)
-        kwargs.update(start_time=start_time, end_time=end_time)
+        kwargs.update(
+            start_time=min(self.start_time, other.start_time),
+            end_time=max(self.end_time, other.end_time),
+        )
 
         # TODO: This is not clean, but `gather_from_jax_processes` used in
         # `evaluate_batches` returns copy of the original fields for
@@ -430,9 +419,6 @@ class EvalTask(bobbin.EvalTask):
 
     def create_eval_results(self):
         return EvalResults(start_time=time.time())
-
-    def finalize_eval_results(self, metrics: EvalResults) -> EvalResults:
-        return metrics.replace(end_time=time.time())
 
     @functools.partial(jax.jit, static_argnums=(0,), donate_argnums=(1,))
     def predict(
@@ -492,6 +478,7 @@ class EvalTask(bobbin.EvalTask):
         return self.predict(b, mvar)
 
     def evaluate(self, batch: _Batch, model_vars: _VarCollection) -> EvalResults:
+        start_time = time.time()
         if batch is None:
             # This is only allowed when we are sure that there's no parallel
             # reduction (e.g. `jax.lax.p*` functions) used in `parallel_predict`.
@@ -511,7 +498,7 @@ class EvalTask(bobbin.EvalTask):
             np.asarray(batch["tokens"]), np.asarray(batch["token_paddings"])
         )
         results = self._build_results(batched_hyp_ids, batched_ref_ids)
-        return results
+        return results.replace(start_time=start_time, end_time=time.time())
 
 
 def make_schedule(
@@ -560,12 +547,12 @@ def _is_running_on_cloud_tpu_vm() -> bool:
 def main(args: argparse.Namespace):
     fill_default_arguments(args)
 
+    if _is_running_on_cloud_tpu_vm() or args.multi_process:
+        jax.distributed.initialize()
+
     if jax.process_index() == 0:
         logging.basicConfig(stream=sys.stderr)
         logging.root.setLevel(logging.INFO)
-
-    if _is_running_on_cloud_tpu_vm() or args.multi_process:
-        jax.distributed.initialize()
 
     train_ds, eval_dss = prepare_datasets(
         tfds_data_dir=args.tfds_data_dir,
