@@ -142,7 +142,7 @@ def prepare_datasets(
     train_batch_size: int = 64,
     eval_batch_size: int = 8,
     max_train_batches: Optional[int] = None,
-) -> tuple[tf.data.Dataset, dict[str, tf.data.Dataset]]:
+) -> Tuple[int, tf.data.Dataset, dict[str, tf.data.Dataset]]:
     builder_kwargs = dict(config="lazy_decode")
     read_config = tfds.ReadConfig(shuffle_seed=jax.process_index())
     train_dataset = tfds.load(
@@ -154,6 +154,7 @@ def prepare_datasets(
         shuffle_files=True,
         download=False,
     )
+    num_examples = int(train_dataset.cardinality())
     eval_dataset_names = ("dev", "test_clean", "test_other")
     eval_datasets = tfds.load(
         "librispeech",
@@ -193,9 +194,11 @@ def prepare_datasets(
         ds.prefetch(1) for ds in (train_dataset, *eval_datasets)
     ]
 
-    return train_dataset, {
-        name: ds for name, ds in zip(eval_dataset_names, eval_datasets)
-    }
+    return (
+        num_examples,
+        train_dataset,
+        {name: ds for name, ds in zip(eval_dataset_names, eval_datasets)},
+    )
 
 
 class CtcAsrModel(nn.Module):
@@ -556,7 +559,7 @@ def main(args: argparse.Namespace):
         logging.basicConfig(stream=sys.stderr)
         logging.root.setLevel(logging.INFO)
 
-    train_ds, eval_dss = prepare_datasets(
+    num_train_samples, train_ds, eval_dss = prepare_datasets(
         tfds_data_dir=args.tfds_data_dir,
         wpm_vocab_path=args.wpm_vocab,
         wpm_size_limit=args.wpm_size_limit,
@@ -564,14 +567,12 @@ def main(args: argparse.Namespace):
         eval_batch_size=args.per_device_batch_size * jax.local_device_count(),
         max_train_batches=args.max_steps,
     )
-    num_train_samples = 28_539 + 104_014 + 148_688
 
     all_checkpoint_path = args.log_dir_path / "all_ckpts"
     best_checkpoint_path = args.log_dir_path / "best_ckpts"
     tensorboard_path = args.log_dir_path / "tensorboard"
 
     wpm_vocab = asrio.WpmVocab.load(args.wpm_vocab, size_limit=args.wpm_size_limit)
-    wpm_size = len(wpm_vocab.id2str)
 
     batch_size, *speech_shape = train_ds.element_spec["speech"].shape
     global_batch_size = batch_size * jax.process_count()
@@ -585,20 +586,19 @@ def main(args: argparse.Namespace):
             normalizer = bobbin.parse_pytree_json(
                 f.read(), asrio.MeanVarNormalizer.empty()
             )
-    model = CtcAsrModel(num_outputs=wpm_size, feature_normalizer=normalizer)
+    model = CtcAsrModel(num_outputs=len(wpm_vocab), feature_normalizer=normalizer)
 
     # init must be deterministic for multi-host training
-    prng_keys = bobbin.prng_keygen(jax.random.PRNGKey(0))
     init_model_vars = jax.jit(model.init)(
         {
-            "dropout": next(prng_keys),
-            "params": next(prng_keys),
-            "specaug": next(prng_keys),
+            "dropout": jax.random.PRNGKey(0),
+            "params": jax.random.PRNGKey(1),
+            "specaug": jax.random.PRNGKey(2),
         },
         *init_inputs,
     )
 
-    prng_keys = bobbin.prng_keygen(jax.random.PRNGKey(jax.process_index() * 123))
+    prng_key = jax.random.PRNGKey(jax.process_index() + 3)
 
     task = CtcAsrTask(model)
     evaler = EvalTask(model, wpm_vocab)
@@ -608,8 +608,6 @@ def main(args: argparse.Namespace):
         model.apply, init_model_vars, tx, checkpoint_path=all_checkpoint_path
     )
     train_state = flax.jax_utils.replicate(train_state, jax.local_devices())
-    if jax.process_count() > 1:
-        bobbin.assert_replica_integrity(train_state)
     train_step_fn = bobbin.pmap_for_train_step(
         task.make_training_step_fn(split_steps=args.split_training_batch),
     )
@@ -647,10 +645,10 @@ def main(args: argparse.Namespace):
             bobbin.PublishTrainingProgress(train_writer), step_interval=100
         )
 
-    bobbin.publish_trainer_env_info(train_writer, train_state)
     logging.info("MAIN LOOP STARTS with devices %s", str(jax.local_devices()))
     for batch in train_ds.as_numpy_iterator():
-        train_state, step_info = train_step_fn(train_state, batch, next(prng_keys))
+        rng, prng_key = jax.random.split(prng_key)
+        train_state, step_info = train_step_fn(train_state, batch, rng)
         train_state_0 = flax.jax_utils.unreplicate(train_state)
         extra_vars = train_state_0.extra_vars
         extra_vars["tensorboard"] = extra_vars["tensorboard"].unfreeze()

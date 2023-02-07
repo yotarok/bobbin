@@ -27,6 +27,7 @@ import optax
 
 from .array_util import split_leading_axis
 
+from .pmap_util import assert_replica_integrity
 from .pmap_util import wrapped_pmap
 from .pmap_util import RngArg
 from .pmap_util import ShardArg
@@ -247,6 +248,9 @@ def initialize_train_state(
 
     if checkpoint_path is not None and os.path.exists(checkpoint_path):
         new_state = checkpoints.restore_checkpoint(checkpoint_path, new_state)
+
+    if jax.process_count() > 1:
+        assert_replica_integrity(new_state, is_device_replicated=False)
 
     return new_state
 

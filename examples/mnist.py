@@ -253,7 +253,6 @@ def make_model() -> nn.Module:
 
 
 def main(args: argparse.Namespace):
-    prng_keys = bobbin.prng_keygen(jax.random.PRNGKey(0))
     train_ds, eval_dss = get_datasets(max_train_batches=args.max_steps)
     all_checkpoint_path = args.log_dir_path / "all_ckpts"
     best_checkpoint_path = args.log_dir_path / "best_ckpts"
@@ -261,8 +260,8 @@ def main(args: argparse.Namespace):
 
     init_inputs = np.zeros(shape=(1, 28, 28, 1), dtype=np.float32)
     init_rngs = {
-        "dropout": next(prng_keys),
-        "params": next(prng_keys),
+        "dropout": jax.random.PRNGKey(1),
+        "params": jax.random.PRNGKey(2),
     }
     model = make_model()
     init_model_vars = jax.jit(model.init)(init_rngs, init_inputs)
@@ -308,8 +307,10 @@ def main(args: argparse.Namespace):
     crontab.schedule(bobbin.PublishTrainingProgress(train_writer), step_interval=100)
 
     logging.info("Main loop started.")
+    prng_key = jax.random.PRNGKey(3)
     for batch in train_ds.as_numpy_iterator():
-        train_state, step_info = train_step_fn(train_state, batch, next(prng_keys))
+        rng, prng_key = jax.random.split(prng_key)
+        train_state, step_info = train_step_fn(train_state, batch, rng)
         train_state_0 = flax.jax_utils.unreplicate(train_state)
         crontab.run(train_state_0, step_info=step_info)
         del train_state.extra_vars["tensorboard"]

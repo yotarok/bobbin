@@ -60,6 +60,9 @@ class WpmVocab:
     def no_token(self) -> int:
         return len(self.str2id)
 
+    def __len__(self) -> int:
+        return len(self.id2str)
+
 
 def wpm_encode(
     vocab: WpmVocab, w: str, unk_symbol: str = "<unk>", bow_symbol: str = "▁"
