@@ -29,7 +29,6 @@ from .cron import PublishTrainingProgress
 from .cron import RunEval
 from .cron import RunEvalKeepBest
 from .cron import SaveCheckpoint
-from .cron import WriteLog
 
 from .evaluation import EvalResults
 from .evaluation import EvalTask
