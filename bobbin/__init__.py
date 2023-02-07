@@ -67,7 +67,6 @@ from .training import TrainState
 
 from .var_util import dump_pytree_json
 from .var_util import parse_pytree_json
-from .var_util import prng_keygen
 from .var_util import read_pytree_json_file
 from .var_util import summarize_shape
 from .var_util import total_dimensionality

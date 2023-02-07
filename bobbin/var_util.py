@@ -87,13 +87,6 @@ def flatten_with_paths(
         yield path, leaf
 
 
-def prng_keygen(seed: _PRNGKey) -> Iterator[_PRNGKey]:
-    """Returns an iterator of unique RNGs."""
-    while True:
-        rng, seed = jax.random.split(seed)
-        yield rng
-
-
 def _json_object_hook_for_arrays(d: Dict[str, Any]) -> Any:
     if "__array__" in d and d["__array__"]:
         dtype = np.dtype(d.get("dtype", "float32"))
