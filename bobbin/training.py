@@ -32,10 +32,10 @@ import optax
 from .array_util import split_leading_axis
 
 from .pmap_util import assert_replica_integrity
-from .pmap_util import wrapped_pmap
 from .pmap_util import RngArg
 from .pmap_util import ShardArg
 from .pmap_util import ThruArg
+from .pmap_util import tpmap
 
 from .pytypes import Batch
 from .pytypes import Parameter
@@ -388,6 +388,6 @@ def pmap_for_train_step(
     train_step_fn: TrainingStepFn, axis_name="batch"
 ) -> TrainingStepFn:
     """Wraps `train_step_fn` with `pmap`."""
-    return wrapped_pmap(
+    return tpmap(
         train_step_fn, axis_name=axis_name, argtypes=[ThruArg(), ShardArg(), RngArg()]
     )

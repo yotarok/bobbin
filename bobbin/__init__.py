@@ -44,8 +44,8 @@ from .pmap_util import RngArg
 from .pmap_util import ShardArg
 from .pmap_util import StaticArg
 from .pmap_util import ThruArg
+from .pmap_util import tpmap
 from .pmap_util import unshard
-from .pmap_util import wrapped_pmap
 
 from .pytypes import Batch
 from .pytypes import BatchGen

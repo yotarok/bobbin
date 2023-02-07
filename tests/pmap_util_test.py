@@ -52,9 +52,9 @@ def setUpModule():
     chex.set_n_cpu_devices(_N_CPU_DEVICES)
 
 
-class WrappedPmapTest(chex.TestCase):
+class TPmapTest(chex.TestCase):
     def test_data_parallel(self):
-        f = pmap_util.wrapped_pmap(
+        f = pmap_util.tpmap(
             noisy_linear,
             "batch",
             ("broadcast", "shard", "rng", "broadcast", "static"),
@@ -74,7 +74,7 @@ class WrappedPmapTest(chex.TestCase):
         )
 
     def test_rng_split(self):
-        f = pmap_util.wrapped_pmap(
+        f = pmap_util.tpmap(
             noisy_linear,
             "batch",
             ("broadcast", "shard", "rng", "broadcast", "static"),
@@ -88,13 +88,12 @@ class WrappedPmapTest(chex.TestCase):
         for i in range(n_shards):
             for j in range(i + 1, n_shards):
                 sq_dist = np.sum((randoms[i] - randoms[j]) ** 2)
-                # TODO: Give some analysis on the comment
                 self.assertGreater(sq_dist, 1.0)
 
     @unittest.mock.patch("jax.pmap")
     def test_device_specification_default(self, mock_pmap):
         # Check that by default, `None`s are passed to `jax.pmap`.
-        pmap_util.wrapped_pmap(lambda x: x, "i", ("shard",))
+        pmap_util.tpmap(lambda x: x, "i", ("shard",))
 
         # Current implementation only calls it once, but it should be okay
         # as long as it is called with proper arguments.
