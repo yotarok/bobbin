@@ -40,7 +40,7 @@ def l2_distortion_loss(params: chex.Array, x: chex.Array):
 
 
 class SgdMeanEstimation(training.TrainTask):
-    def compute_loss(self, params, batch, *, extra_vars, prng_key):
+    def compute_loss(self, params, batch, *, extra_vars, prng_key, step):
         # those are not used
         del extra_vars
         del prng_key

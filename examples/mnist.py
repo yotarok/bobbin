@@ -166,10 +166,11 @@ class ClassificationTask(bobbin.TrainTask):
         *,
         extra_vars: _VarCollection,
         prng_key: chex.PRNGKey,
+        step: chex.Scalar,
     ) -> Tuple[chex.Scalar, Tuple[_VarCollection, LossAuxOut]]:
         inputs, labels = batch
         model_vars = extra_vars.copy()
-        model_vars.update(params=params, intermediates=dict())
+        model_vars.update(params=params, tensorboard=dict())
         logits, updated_vars = self.model.apply(
             model_vars,
             inputs,
@@ -311,9 +312,7 @@ def main(args: argparse.Namespace):
     for batch in train_ds.as_numpy_iterator():
         rng, prng_key = jax.random.split(prng_key)
         train_state, step_info = train_step_fn(train_state, batch, rng)
-        train_state_0 = flax.jax_utils.unreplicate(train_state)
-        crontab.run(train_state_0, step_info=step_info)
-        del train_state.extra_vars["tensorboard"]
+        crontab.run(train_state, step_info=step_info)
 
 
 if __name__ == "__main__":
