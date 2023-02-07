@@ -37,7 +37,7 @@ def pmap_shard_tree(x: _ArrayTree, ndevices: int) -> _ArrayTree:
 
 
 class ArgType(metaclass=abc.ABCMeta):
-    """Description for arguments passed to function obtained by `wrapped_pmap`."""
+    """Description for arguments passed to function obtained by `tpmap`."""
 
     @abc.abstractmethod
     def transform(self, x: _ArrayTree, devices: Sequence[Device]):
@@ -112,7 +112,7 @@ def resolve_argtype_str(ty: Union[str, ArgType]) -> ArgType:
         return ty
 
 
-def wrapped_pmap(
+def tpmap(
     f: Callable,
     axis_name: str,
     argtypes: Sequence[Union[str, ArgType]],
@@ -123,8 +123,10 @@ def wrapped_pmap(
     wrap_return: Optional[Callable[[_ArrayTree], _ArrayTree]] = None,
     **kwargs,
 ) -> Callable:
-    """Wrap a Jax function so it can be transparently performed on multiple devices.
+    """Transparent pmap (tpmap).
 
+    This function wraps a Jax function so it can be transparently performed on
+    multiple devices.
     This wraps the function `f` with `jax.pmap` with applying argument-and-return
     wrappers for ensuring API compatibility with the original function.
 

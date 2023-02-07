@@ -203,7 +203,7 @@ class EvalTask(bobbin.EvalTask):
         return EvalResults(correct_count=0, predict_count=0, sum_logprobs=0.0)
 
     @functools.partial(
-        bobbin.wrapped_pmap,
+        bobbin.tpmap,
         axis_name="batch",
         argtypes=["static", "shard", "broadcast"],
         wrap_return=EvalResults.unshard_and_reduce,

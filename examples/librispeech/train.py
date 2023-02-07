@@ -490,7 +490,7 @@ class EvalTask(bobbin.EvalTask):
         )
 
     @functools.partial(
-        bobbin.wrapped_pmap,
+        bobbin.tpmap,
         axis_name="batch",
         argtypes=["static", "shard", "broadcast"],
         donate_argnums=(1,),
