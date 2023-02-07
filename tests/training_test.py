@@ -19,6 +19,7 @@ import unittest
 from absl.testing import absltest
 import chex
 import flax
+import flax.linen as nn
 import numpy as np
 import jax
 import jax.numpy as jnp
@@ -41,13 +42,44 @@ def l2_distortion_loss(params: chex.Array, x: chex.Array):
     return jnp.mean((params[np.newaxis, :] - x) ** 2.0)
 
 
-class SgdMeanEstimation(training.TrainTask):
+class SgdMeanEstimation(training.BaseTrainTask):
+    """Sample of BaseTrainTask."""
+
     def compute_loss(self, params, batch, *, extra_vars, prng_key, step):
         # those are not used
         del extra_vars
         del prng_key
+        del step
 
         return l2_distortion_loss(params, batch), (dict(), None)
+
+
+class LogisticRegressionTask(training.TrainTask):
+    """Sample of TrainTask (i.e. BaseTrainTask with flax module.)"""
+
+    def __init__(self, input_dim: int = 5):
+        mod = nn.Sequential(
+            [nn.Dropout(0.5, deterministic=False), nn.Dense(features=1)]
+        )
+        example_args = (
+            np.zeros(
+                (
+                    1,
+                    input_dim,
+                )
+            ),
+        )
+        super().__init__(mod, example_args, required_rngs=("dropout",))
+
+    def compute_loss(self, params, batch, *, extra_vars, prng_key, step):
+        del prng_key
+        del step
+
+        inputs, labels = batch
+        model_vars = extra_vars.copy()
+        model_vars.update(params=params)
+        pred = self.model.apply(model_vars, inputs, rngs=self.get_rng_dict())
+        return -jax.nn.log_sigmoid(labels * pred)
 
 
 class TrainStateTest(chex.TestCase):
@@ -166,6 +198,14 @@ class TrainTaskTest(chex.TestCase):
         task.write_trainer_log.assert_called_once_with(
             train_state, step_info=step_info, logger=stub_logger, loglevel=loglevel
         )
+
+    def test_initialization(self):
+        task = LogisticRegressionTask(5)
+        train_state = task.initialize_train_state(
+            jax.random.PRNGKey(0), optax.sgd(0.001), checkpoint_path="none"
+        )
+        chex.assert_shape(train_state.params["layers_1"]["kernel"], (5, 1))
+        chex.assert_shape(train_state.params["layers_1"]["bias"], (1,))
 
 
 if __name__ == "__main__":

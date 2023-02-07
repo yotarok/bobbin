@@ -16,9 +16,10 @@
 
 import functools
 import os
-from typing import Any, Callable, Optional, Tuple, Union
+from typing import Any, Callable, Dict, Iterable, Mapping, Optional, Tuple, Union
 
 import chex
+from flax import linen as nn
 from flax import struct
 from flax.training import checkpoints
 import flax.training.train_state
@@ -154,7 +155,7 @@ def _split_and_apply_value_and_grad(
     return (loss, (mutated_vars, loss_aux)), grads
 
 
-class TrainTask:
+class BaseTrainTask:
     """Base class defining training task."""
 
     def compute_loss(
@@ -271,8 +272,97 @@ class TrainTask:
         )
 
 
+class TrainTask(BaseTrainTask):
+    """Task definition for training of parameters of `nn.Module`."""
+
+    def __init__(
+        self,
+        model: nn.Module,
+        example_args: Tuple[Any],
+        example_kwargs: Mapping[str, Any] = None,
+        required_rngs: Iterable[str] = (),
+    ):
+        """Constructs the train task.
+
+        Args:
+          model: flax model to be trained.
+          required_rngs: the sequence of RNG names required for training.
+            the values provided here will be used in `TrainTask.get_rng_dict`
+            for simplifying RNG handling in for example `compute_loss`.
+        """
+        super().__init__()
+        self._model = model
+        self._required_rngs = tuple(required_rngs)
+        self._example_args = example_args
+        self._example_kwargs = dict() if example_kwargs is None else example_kwargs
+
+    @property
+    def model(self) -> nn.Module:
+        """Returns `model` given in the constructor."""
+        return self._model
+
+    def get_rng_dict(
+        self, rng_key: chex.PRNGKey, extra_keys: Iterable[str] = ()
+    ) -> Dict[str, chex.PRNGKey]:
+        """
+        Splits `rng_key` and returns rngs for each key specified in constructor.
+
+        Args:
+          rng_key: base RNG seed to be split.
+          extra_keys: if set, additional RNG seeds are generated and stored to
+            the return value with the provided keys.
+        """
+        keys = self._required_rngs + tuple(extra_keys)
+        rngs = jax.random.split(rng_key, len(keys))
+        return {key: rng for key, rng in zip(keys, rngs)}
+
+    def _initialize_vars(
+        self, rng_key: chex.PRNGKey, compile_init: Optional[Callable] = None
+    ) -> VarCollection:
+        """Initializes the model variables."""
+        if compile_init is None:
+            init_fn = self.model.init
+        else:
+            init_fn = self.compile_init_fn(self.model.init)
+
+        return init_fn(
+            self.get_rng_dict(rng_key, ("params",)),
+            *self._example_args,
+            **self._example_kwargs,
+        )
+
+    def initialize_train_state(
+        self,
+        rng: chex.PRNGKey,
+        tx: optax.GradientTransformation,
+        checkpoint_path: Union[str, bytes, os.PathLike, None] = None,
+        compile_init: Optional[Callable] = None,
+    ) -> TrainState:
+        """Initializes `TrainState` for this task.
+
+        Args:
+          rng: RNG seed for variable initialization.
+          tx: optax gradient transformer attached to `TrainState`.
+          checkpoint_path: if set, this method first tries to deserialize from
+            a checkpoint in the checkpoint_path.
+          compile_init: if set, `self.model.init` is wrapped by the given
+            function as `compile_init(self.model.init)`.
+
+        Returns:
+          initialized train state.
+        """
+        global initialize_train_state
+        init_model_vars = self._initialize_vars(rng, compile_init=compile_init)
+        return initialize_train_state(
+            apply_fn=self.compute_loss,
+            init_model_vars=init_model_vars,
+            tx=tx,
+            checkpoint_path=checkpoint_path,
+        )
+
+
 def initialize_train_state(
-    apply_fn: Callable,
+    apply_fn: Optional[Callable],
     init_model_vars: VarCollection,
     tx: optax.GradientTransformation,
     checkpoint_path: Union[str, bytes, os.PathLike, None] = None,

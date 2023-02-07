@@ -256,9 +256,23 @@ class LossAuxOut:
 
 
 class CtcAsrTask(bobbin.TrainTask):
-    def __init__(self, model: nn.Module, learn_rate_fn):
+    def __init__(
+        self,
+        model: nn.Module,
+        learn_rate_fn: optax.Schedule,
+        example_shape: Sequence[int],
+    ):
+        example_args = (
+            jnp.zeros((1, *example_shape), dtype=np.int16),
+            jnp.ones((1, example_shape[0]), dtype=np.float32),
+        )
+        super().__init__(
+            model,
+            example_args=example_args,
+            required_rngs=("dropout", "params", "specaug"),
+        )
+
         self._learn_rate_fn = learn_rate_fn
-        self._model = model
 
     def compute_loss(
         self, params, batch, *, extra_vars, prng_key, step
@@ -266,13 +280,12 @@ class CtcAsrTask(bobbin.TrainTask):
         model_vars = extra_vars.copy()
         # Update params, and clear tensorboard SoWs.
         model_vars.update(params=params, tensorboard=dict())
-        rng_dropout, rng_specaug = jax.random.split(prng_key)
         (logits, logit_paddings), updated_vars = self._model.apply(
             model_vars,
             batch["speech"],
             batch["speech_paddings"],
             is_eval=False,
-            rngs=dict(dropout=rng_dropout, specaug=rng_specaug),
+            rngs=self.get_rng_dict(prng_key),
             mutable=flax.core.DenyList("params"),
         )
         per_sample_loss = optax.ctc_loss(
@@ -576,44 +589,31 @@ def main(args: argparse.Namespace):
     tensorboard_path = args.log_dir_path / "tensorboard"
 
     wpm_vocab = asrio.WpmVocab.load(args.wpm_vocab, size_limit=args.wpm_size_limit)
-
-    batch_size, *speech_shape = train_ds.element_spec["speech"].shape
-    global_batch_size = batch_size * jax.process_count()
-    init_inputs = (
-        jnp.zeros((1, *speech_shape), dtype=np.int16),
-        jnp.ones((1, speech_shape[0]), dtype=np.float32),
-    )
     normalizer = None
     if args.feature_normalizer is not None:
         with open(args.feature_normalizer) as f:
             normalizer = bobbin.parse_pytree_json(
                 f.read(), asrio.MeanVarNormalizer.empty()
             )
+
+    batch_size, *speech_shape = train_ds.element_spec["speech"].shape
+    global_batch_size = batch_size * jax.process_count()
+
     model = CtcAsrModel(num_outputs=len(wpm_vocab), feature_normalizer=normalizer)
-
-    # init must be deterministic for multi-host training
-    init_model_vars = jax.jit(model.init)(
-        {
-            "dropout": jax.random.PRNGKey(0),
-            "params": jax.random.PRNGKey(1),
-            "specaug": jax.random.PRNGKey(2),
-        },
-        *init_inputs,
-    )
-
-    prng_key = jax.random.PRNGKey(jax.process_index() + 3)
-
     tx, learn_rate_fn = make_tx()
-    task = CtcAsrTask(model, learn_rate_fn)
+    task = CtcAsrTask(model, learn_rate_fn, speech_shape)
     evaler = EvalTask(model, wpm_vocab)
     eval_batch_gens = {dsname: ds.as_numpy_iterator for dsname, ds in eval_dss.items()}
-    train_state = bobbin.initialize_train_state(
-        model.apply, init_model_vars, tx, checkpoint_path=all_checkpoint_path
+    train_state = task.initialize_train_state(
+        jax.random.PRNGKey(0), tx, checkpoint_path=all_checkpoint_path
     )
     train_state = flax.jax_utils.replicate(train_state, jax.local_devices())
     train_step_fn = bobbin.pmap_for_train_step(
         task.make_training_step_fn(split_steps=args.split_training_batch),
     )
+
+    # init must be deterministic for multi-host training
+    prng_key = jax.random.PRNGKey(jax.process_index() + 3)
 
     train_writer = (
         flax_tb.SummaryWriter(tensorboard_path / "train")

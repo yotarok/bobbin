@@ -157,7 +157,11 @@ class LossAuxOut:
 
 class ClassificationTask(bobbin.TrainTask):
     def __init__(self, model: nn.Module):
-        self.model = model
+        super().__init__(
+            model,
+            example_args=(np.zeros(shape=(1, 28, 28, 1), dtype=np.float32)),
+            required_rngs=("dropout", "params"),
+        )
 
     def compute_loss(
         self,
@@ -174,7 +178,7 @@ class ClassificationTask(bobbin.TrainTask):
         logits, updated_vars = self.model.apply(
             model_vars,
             inputs,
-            rngs={"dropout": prng_key},
+            rngs=self.get_rng_dict(prng_key),
             mutable=flax.core.DenyList("params"),
         )
         unused_batch_size, num_classes = logits.shape
@@ -259,18 +263,12 @@ def main(args: argparse.Namespace):
     best_checkpoint_path = args.log_dir_path / "best_ckpts"
     tensorboard_path = args.log_dir_path / "tensorboard"
 
-    init_inputs = np.zeros(shape=(1, 28, 28, 1), dtype=np.float32)
-    init_rngs = {
-        "dropout": jax.random.PRNGKey(1),
-        "params": jax.random.PRNGKey(2),
-    }
     model = make_model()
-    init_model_vars = jax.jit(model.init)(init_rngs, init_inputs)
 
     task = ClassificationTask(model)
     evaler = EvalTask(model)
-    train_state = bobbin.initialize_train_state(
-        model.apply, init_model_vars, make_tx(), checkpoint_path=all_checkpoint_path
+    train_state = task.initialize_train_state(
+        jax.random.PRNGKey(0), make_tx(), checkpoint_path=all_checkpoint_path
     )
     init_train_state = train_state
     train_state = flax.jax_utils.replicate(train_state, jax.local_devices())
@@ -278,11 +276,6 @@ def main(args: argparse.Namespace):
     train_step_fn = bobbin.pmap_for_train_step(jax.jit(task.make_training_step_fn()))
 
     train_writer = flax_tb.SummaryWriter(tensorboard_path / "train")
-    train_writer.text(
-        "trainer/log/total_num_params",
-        f"Number of parameters: {bobbin.total_dimensionality(init_train_state.params)}",
-        step=init_train_state.step,
-    )
     bobbin.publish_trainer_env_info(train_writer, init_train_state)
 
     warmup = 5
