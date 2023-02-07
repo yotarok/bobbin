@@ -457,9 +457,9 @@ def _build_1d_masks(
     rng_for_loc, rng_for_width = jax.random.split(rng)
     if limits is None:
         limits = target_length
-    if not isinstance(limits, _Array):
+    if isinstance(limits, int):
         limits = jnp.full((batch_size,), limits, dtype=np.float32)
-    if not isinstance(widths, _Array):
+    if isinstance(widths, int):
         widths = jnp.full((batch_size,), widths, dtype=np.float32)
 
     limits -= widths
