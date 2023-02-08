@@ -155,13 +155,13 @@ class CronTab:
           name: name for the registered action-trigger pair.
           kwargs:
             the following trigger specifiers are currently supported:
-              - `step_interval=N`: do action for each N-steps.
-              - `at_step=N` or `at_step=(N1, N2, ...)`: do action at N, N1, or
+              - `step_interval=N` : do action for each N-steps.
+              - `at_step=N` or `at_step=(N1, N2, ...)` : do action at N, N1, or
                 N2 steps
-              - `at_first_steps=N`: do action for the first N steps of training.
-              - `at_first_steps_of_process=N`: do action for the first N steps
+              - `at_first_steps=N` : do action for the first N steps of training.
+              - `at_first_steps_of_process=N` : do action for the first N steps
                 since the current training process started.
-              - `time_interval=X`: do action if X (`float`) seconds passed since
+              - `time_interval=X` : do action if X (`float`) seconds passed since
                 the last action from this trigger is invoked.
 
         Returns:
@@ -172,7 +172,7 @@ class CronTab:
         for argname, argvalue in kwargs.items():
             if argname not in _SCHEDULE_ARG_PARSER:
                 raise TypeError(
-                    "`CronTag.schedule` got an unexpected keyword argument"
+                    "`CronTab.schedule` got an unexpected keyword argument"
                     f"'{argname}'"
                 )
             triggers.append(_SCHEDULE_ARG_PARSER[argname](argvalue))
@@ -211,7 +211,7 @@ class CronTab:
           train_state: current training state.
           is_train_state_replicated: if True (by default), `train_state` will be
             unreplicated before given to actions.
-          *args, **kwargs: extra parameters passed to the actions.
+          args, kwargs: extra parameters passed to the actions.
         """
 
         if is_train_state_replicated:

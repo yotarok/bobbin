@@ -29,3 +29,5 @@ pip3 install fiddle
 pip3 install black
 pip3 install flake8
 pip3 install pytype
+
+pip3 install sphinx sphinx-autodoc-typehints sphinx_rtd_theme

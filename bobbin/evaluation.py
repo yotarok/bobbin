@@ -62,11 +62,11 @@ class EvalResults:
     """Evaluation results."""
 
     def to_log_message(self):
-        """Format `EvalResult` to a logging-friendly string."""
+        """Format `EvalResults` to a logging-friendly string."""
         return str(self)
 
     def reduce(self, other: EvalResults) -> EvalResults:
-        """Combines two `EvalResult`s."""
+        """Combines two `EvalResults`."""
         raise NotImplementedError()
 
     def unshard_and_reduce(self) -> EvalResults:
