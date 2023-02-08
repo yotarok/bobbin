@@ -123,7 +123,7 @@ class RunEval:
     def __init__(
         self,
         eval_task: EvalTask,
-        eval_batch_gens: Mapping[str, Callable[[], Iterator[Batch]]],
+        eval_batch_gens: Mapping[str, BatchGen],
         tensorboard_root_path: Union[None, str, os.PathLike[str]] = None,
     ):
         self._eval_task = eval_task
