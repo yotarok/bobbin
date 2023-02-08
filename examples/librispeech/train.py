@@ -12,8 +12,14 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""Sample with LibriSpeech.
+"""LibriSpeech example.
 """
+
+# This sample is for demonstrating scalability to a large scale problem.
+# See also "examples/gcp/README.md" for how to run this example script.
+#
+# For understanding how multi-process training work in Jax, please refer
+# the document: https://jax.readthedocs.io/en/latest/multi_process.html
 
 from __future__ import annotations
 
@@ -49,6 +55,10 @@ Array = chex.Array
 Batch = bobbin.Batch
 VarCollection = bobbin.VarCollection
 
+
+# Similar to the MNIST example, the first part of this script is about data
+# and resource handling. You can skip most of them; however, there's an
+# important step for distributed training in `prepare_batch` function.
 
 _DEFAULT_WPM_VOCAB_URL = "https://raw.githubusercontent.com/tensorflow/lingvo/master/lingvo/tasks/asr/wpm_16k_librispeech.vocab"  # noqa: E501
 
@@ -155,6 +165,12 @@ def prepare_datasets(
         download=False,
     )
     num_examples = int(train_dataset.cardinality())
+
+    # Evaluation datasets for jax multi-process training should be evenly split
+    # for each process.  For this purpose, `tfds.split_for_jax_process` can be
+    # used as follows.  In theory, training data should also be split, but we
+    # don't care because it is anyway repeated with shuffling, so we only need
+    # to ensure that different random seeds are used in different processes.
     eval_dataset_names = ("dev", "test_clean", "test_other")
     eval_datasets = tfds.load(
         "librispeech",
@@ -176,6 +192,7 @@ def prepare_datasets(
         tokenize_dataset(wpm_vocab, ds) for ds in (train_dataset, *eval_datasets)
     ]
 
+    # Here, we take the random seed from `jax.process_index()`.
     train_dataset = train_dataset.repeat().shuffle(
         buffer_size=1024, seed=jax.process_index()
     )
@@ -201,6 +218,14 @@ def prepare_datasets(
     )
 
 
+# Similar to MNIST sample, we define a neural network to be optimized as
+# `flax.linen.Module`.  We don't go details of this implementation. It is a
+# simple module that takes `waveform` and `waveform_paddings` as inputs, and
+# returns `logits` and `logit_paddings` as outputs.  Here, `*_paddings` is used
+# for packing variable-length samples and logits in the fixed-size batches.
+# `*_paddings` is used as a padding indicator, that means that if
+# `logit_paddings[b, t] == 1`, `logits[b, t, ...]` is padded values, and should
+# not be used. The padding indicators expected to have 0 or 1 values.
 class CtcAsrModel(nn.Module):
     num_outputs: int
     feature_normalizer: Optional[asrio.MeanVarNormalizer] = None
@@ -248,6 +273,8 @@ class CtcAsrModel(nn.Module):
         return logits, encode_paddings
 
 
+# As similar to MNIST example, the auxiliary output for loss function is defined
+# as follows.
 @struct.dataclass
 class LossAuxOut:
     logits: Array
@@ -255,6 +282,8 @@ class LossAuxOut:
     per_sample_loss: Array
 
 
+# Again similar to MNIST example, training task is defined by subclassing
+# `bobbin.TrainTask`.
 class CtcAsrTask(bobbin.TrainTask):
     def __init__(
         self,
@@ -266,20 +295,35 @@ class CtcAsrTask(bobbin.TrainTask):
             jnp.zeros((1, *example_shape), dtype=np.int16),
             jnp.ones((1, example_shape[0]), dtype=np.float32),
         )
+        # As described in MNIST example, the constructor of `bobbin.TrainTask`
+        # takes following arguments:
+        #   - model to be trained
+        #   - example inputs for determining the shapes of the variables.
+        #   - the names of random-number generators (RNGs) required for
+        #     computing the loss function.
+        # For RNGs, it should be noted that this model requires two kinds of
+        # RNGs; one for dropout, and one for SpecAug.
         super().__init__(
             model,
             example_args=example_args,
-            required_rngs=("dropout", "params", "specaug"),
+            required_rngs=("dropout", "specaug"),
         )
-
+        # This TrainTask holds learning rate function for publishing learning
+        # rates to TensorBoard.
         self._learn_rate_fn = learn_rate_fn
 
+    # `bobbin.TrainTask.compute_loss` is the central part of the training.
+    # This method must be overridden to define how to compute the loss function
+    # from the given parameters and the input batch.
     def compute_loss(
         self, params, batch, *, extra_vars, prng_key, step
     ) -> Tuple[chex.Scalar, Tuple[VarCollection, LossAuxOut]]:
+        # Prepare model variables for loss computation as we did in MNIST
+        # example.
         model_vars = extra_vars.copy()
-        # Update params, and clear tensorboard summaries in the previous step.
         model_vars.update(params=params, tensorboard=dict())
+
+        # CTC loss is computed over logits computed.
         (logits, logit_paddings), updated_vars = self._model.apply(
             model_vars,
             batch["speech"],
@@ -292,14 +336,21 @@ class CtcAsrTask(bobbin.TrainTask):
             logits, logit_paddings, batch["tokens"], batch["token_paddings"]
         )
 
+        # CTC loss is normalized using the numbers of tokens. The numbers of
+        # tokens can be obtained by using the pading indicators.
         num_tokens = jnp.maximum(jnp.sum(1.0 - batch["token_paddings"], axis=-1), 1.0)
         per_token_loss = per_sample_loss / num_tokens
-
         loss = jnp.mean(per_token_loss)
+
+        # Update TensorBoard variables so it includes learning rate and loss
+        # values.
+        # The API for updating variables from `compute_loss` might be subjected
+        # to change near future.
         tb_vars = updated_vars["tensorboard"].unfreeze()
         tb_vars["loss"] = bobbin.ScalarSummary(loss)
         tb_vars["learn_rate"] = bobbin.ScalarSummary(self._learn_rate_fn(step))
         updated_vars = updated_vars.copy(dict(tensorboard=tb_vars))
+
         return loss, (
             updated_vars,
             LossAuxOut(
@@ -310,6 +361,7 @@ class CtcAsrTask(bobbin.TrainTask):
         )
 
 
+# Here we define two utility functions for publishing error informations.
 def _error_to_log_message(error: asrio.SequenceError) -> str:
     return (
         f"S={error.subs}, D={error.dels}, I={error.inss}, "
@@ -332,6 +384,16 @@ def _write_error_to_tensorboard(
     writer.scalar(prefix + f"num_hyps_{token_type}", error.hyps, step=step)
 
 
+# EvalResult for LibriSpeech task is composition of four kinds of errors,
+# `token_error`, `word_error`, `char_error`, and sentence error.
+# The first three kinds of errors are edit-distances, we use
+# `asrio.SequenceError` to compute and hold edit-distances. The sentence errors
+# are counted by using `num_sentences` and `num_sentence_errors` variables.
+# In addition to that this metric holds timing information for measuring the
+# decoding speed.  `start_time` is a timestamp for the moment when evaluation is
+# started, and `end_time` is a timestamp for the moment when result is
+# finalized. `sampled_results` field is for keeping some sampled results for
+# monitoring the decoding results on TensorBoard.
 @struct.dataclass
 class EvalResults(bobbin.EvalResults):
     token_error: asrio.SequenceError = struct.field(default_factory=asrio.SequenceError)
@@ -345,6 +407,9 @@ class EvalResults(bobbin.EvalResults):
         pytree_node=False, default=bobbin.SampledSet(max_size=3)
     )
 
+    # `end_time` will be populated when finalizing the result, so this property
+    # needs to support the case when `end_time == 0` and `start_time` is an
+    # actual start timestamp.
     @property
     def wall_time(self) -> Optional[float]:
         return (
@@ -378,6 +443,8 @@ class EvalResults(bobbin.EvalResults):
             + sample_summary
         )
 
+    # As same as in the MNIST example, `reduce` is used to merge two
+    # `EvalResults` from different batch.
     def reduce(self, other: EvalResults) -> EvalResults:
         kwargs = dict()
         for key in (
@@ -391,6 +458,10 @@ class EvalResults(bobbin.EvalResults):
                 lambda x, y: x + y, getattr(self, key), getattr(other, key)
             )
 
+        # reduction of timing information is a bit tricky.  Here, we take
+        # minimum of `start_time` and maximum of `end_time` so we keep the
+        # timing information from the first `EvalResults` created, and the last
+        # `EvalResults` finalized.
         kwargs.update(
             start_time=min(self.start_time, other.start_time),
             end_time=max(self.end_time, other.end_time),
@@ -409,9 +480,14 @@ class EvalResults(bobbin.EvalResults):
         kwargs.update(sampled_results=sampled_results)
         return EvalResults(**kwargs)
 
+    # `is_better_than` will be used for keeping the "best" results and
+    # checkpoint.
     def is_better_than(self, other: EvalResults) -> bool:
         return self.word_error.error_rate < other.word_error.error_rate
 
+    # `write_to_tensorboard` in this example publishes some error rates, and the
+    # number of processed tokens/ chars/ words.  In addition to those, it
+    # outputs sampled decoding results as text summaries.
     def write_to_tensorboard(
         self,
         current_train_state: bobbin.TrainState,
@@ -433,15 +509,25 @@ class EvalResults(bobbin.EvalResults):
             )
 
 
+# EvalTask is similar to what we saw in the MNIST example.
 class EvalTask(bobbin.EvalTask):
     def __init__(self, model: nn.Module, wpm_vocab: asrio.WpmVocab):
         self.model = model
         self.wpm_vocab = wpm_vocab
 
+    # Note that `start_time` is set here.
     def create_eval_results(self, unused_dataset_name):
         return EvalResults(start_time=time.time())
 
-    @functools.partial(jax.jit, static_argnums=(0,), donate_argnums=(1,))
+    # Here, we have an extra function that is called from `EvalResults.evaluate`.
+    # This part of function is separated out from `evaluate` since we want to do
+    # device-parallel JIT-ed computation only for this part of evaluation.
+    @functools.partial(
+        bobbin.tpmap,
+        axis_name="batch",
+        argtypes=["static", "shard", "broadcast"],
+        donate_argnums=(1,),
+    )
     def predict(self, batch: Batch, model_vars: VarCollection) -> Tuple[Array, Array]:
         logits, logit_paddings = self.model.apply(
             model_vars, batch["speech"], batch["speech_paddings"], is_eval=True
@@ -449,6 +535,45 @@ class EvalTask(bobbin.EvalTask):
         predicts = logits.argmax(axis=-1)
         return predicts, logit_paddings
 
+    # Rest of the evaluation process is written in this `evaluate` function.
+    def evaluate(self, batch: Batch, model_vars: VarCollection) -> EvalResults:
+        start_time = time.time()
+        if batch is None:
+            # This is only allowed when we are sure that there's no parallel
+            # reduction (e.g. `jax.lax.p*` functions) used in `parallel_predict`.
+            # Otherwise, all reduction operators must be called in the same
+            # order in each process. Usually this is done by feeding a dummy
+            # batch.
+            return EvalResults()
+        results = self.predict(batch, model_vars)
+        # It's important to ensure both are NumPy-array (and on CPU)
+        results = jax.tree_util.tree_map(np.asarray, results)
+        predicts, predict_paddings = bobbin.flatten_leading_axes(results)
+
+        # Here, we remove CTC blanks and convert padded token-id batches into
+        # a list-of-lists.
+        batched_hyp_ids = asrio.remove_ctc_blanks_and_repeats(
+            predicts, predict_paddings
+        )
+        batched_ref_ids = asrio.make_list_from_padded_batch(
+            np.asarray(batch["tokens"]), np.asarray(batch["token_paddings"])
+        )
+
+        # Actual result is computed in the other function.
+        results = self._build_results(batched_hyp_ids, batched_ref_ids)
+
+        # Setting `start_time` here is actually redundant.
+        # Evaluation loop runs as in the following pseudo-code:
+        #    results = self.create_eval_results("dataset_name")
+        #    for batch in batches:
+        #      new_result = self.evaluate(batch, model_vars)
+        #      results = results.reduce(new_results)
+        # As shown above, if we have `start_time` at the first line of the code
+        # we don't get `start_time` that is smaller than that in the `evaluate`
+        # later. So, it is redundant but kept as it is for clarity.
+        return results.replace(start_time=start_time, end_time=time.time())
+
+    # This function build a result for the given sequences of token ids.
     def _build_results(
         self,
         batched_hyp_ids: Iterable[Sequence[int]],
@@ -461,20 +586,32 @@ class EvalTask(bobbin.EvalTask):
         sent_err = 0
         num_sentences = 0
         sampled_results = bobbin.SampledSet(max_size=3)
+
+        # For each sequence in the batch...
         for hyp_ids, ref_ids in zip(batched_hyp_ids, batched_ref_ids):
             if not ref_ids:
                 continue  # all-pad sequences are treated as invalid sequence.
+
+            # Compute token errors first.
             acc_token_error = acc_token_error.accumulate(hyp_ids, ref_ids)
+
+            # Then, detokenize for comparing texts.
             hyp_text = asrio.wpm_decode_sentence(self.wpm_vocab, hyp_ids)
             ref_text = asrio.wpm_decode_sentence(self.wpm_vocab, ref_ids)
+
+            # Word errors and character errors are computed in the same way.
             acc_word_error = acc_word_error.accumulate(
                 hyp_text.split(" "), ref_text.split(" ")
             )
             acc_char_error = acc_char_error.accumulate(list(hyp_text), list(ref_text))
+
+            # Sentence error can be computed by directly compare texts.
             if hyp_text != ref_text:
                 sent_err += 1
             num_sentences += 1
 
+            # Finally, add some samples from pairs of hypothesis and reference
+            # strings.
             sampled_results = sampled_results.add((hyp_text, ref_text))
 
         return dataclasses.replace(
@@ -487,39 +624,8 @@ class EvalTask(bobbin.EvalTask):
             sampled_results=sampled_results,
         )
 
-    @functools.partial(
-        bobbin.tpmap,
-        axis_name="batch",
-        argtypes=["static", "shard", "broadcast"],
-        donate_argnums=(1,),
-    )
-    def parallel_predict(self, b, mvar):
-        return self.predict(b, mvar)
 
-    def evaluate(self, batch: Batch, model_vars: VarCollection) -> EvalResults:
-        start_time = time.time()
-        if batch is None:
-            # This is only allowed when we are sure that there's no parallel
-            # reduction (e.g. `jax.lax.p*` functions) used in `parallel_predict`.
-            # Otherwise, all reduction operators must be called in the same
-            # order in each process. Usually this is done by feeding a dummy
-            # batch.
-            return EvalResults()
-        results = self.parallel_predict(batch, model_vars)
-        # It's important to ensure both are NumPy-array (and on CPU)
-        results = jax.tree_util.tree_map(np.asarray, results)
-        predicts, predict_paddings = bobbin.flatten_leading_axes(results)
-
-        batched_hyp_ids = asrio.remove_ctc_blanks_and_repeats(
-            predicts, predict_paddings
-        )
-        batched_ref_ids = asrio.make_list_from_padded_batch(
-            np.asarray(batch["tokens"]), np.asarray(batch["token_paddings"])
-        )
-        results = self._build_results(batched_hyp_ids, batched_ref_ids)
-        return results.replace(start_time=start_time, end_time=time.time())
-
-
+# This function makes Transformer schedule function.
 def make_schedule(
     base_learn_rate: float = 5.0, warmup_steps: int = 10000, model_dims: int = 256
 ) -> optax.Schedule:
@@ -532,11 +638,20 @@ def make_schedule(
     return schedule
 
 
+# and this function makes optimizer using the transformer scheduling function
+# above.  The scheduling function is also returned for using it to publish
+# learning rates to TensorBoard.
 def make_tx() -> tuple[optax.GradientTransformation, optax.Schedule]:
     schedule = make_schedule()
     return optax.adamw(schedule, weight_decay=1e-6), schedule
 
 
+# The following two utility functions are for simplifying command-line
+# arguments.
+#
+# This function fills default arguments by downloading WPM definition from the
+# web, and by finding the path for mean/ stddev statistics as a relative path
+# from this script path.
 def fill_default_arguments(args: argparse.Namespace):
     if args.wpm_vocab is None:
         f = tempfile.NamedTemporaryFile()
@@ -549,6 +664,10 @@ def fill_default_arguments(args: argparse.Namespace):
         args.feature_normalizer = str(p)
 
 
+# If the script is running on Cloud TPU, we can safely call
+# `jax.distributed.initialize()` as all required configuration is automatically
+# done even when the program is running on a single process. So, this function
+# is used to enable "--multi_process" flag if it is running on Cloud TPU.
 def _is_running_on_cloud_tpu_vm() -> bool:
     libtpu_found = False
     try:
@@ -563,9 +682,17 @@ def _is_running_on_cloud_tpu_vm() -> bool:
     return os.environ.get("CLOUDSDK_PYTHON", None) is not None and libtpu_found
 
 
+# Finally, main function is here and it is not so different from that of the
+# MNIST example.
 def main(args: argparse.Namespace):
     fill_default_arguments(args)
 
+    # For multi-process training, we first need to call
+    # `jax.distributed.initialize()`.  On cloud TPUs, it is safe to call this
+    # function without explicit configurations.
+    # Here, we don't specify the configuration arguments here, so if you want to
+    # run multi-process training without cloud TPUs, you may need to set some
+    # environment variables.
     if _is_running_on_cloud_tpu_vm() or args.multi_process:
         jax.distributed.initialize()
 
@@ -581,36 +708,46 @@ def main(args: argparse.Namespace):
         eval_batch_size=args.per_device_batch_size * jax.local_device_count(),
         max_train_batches=args.max_steps,
     )
+    batch_size, *speech_shape = train_ds.element_spec["speech"].shape
+    global_batch_size = batch_size * jax.process_count()
+    eval_batch_gens = {dsname: ds.as_numpy_iterator for dsname, ds in eval_dss.items()}
 
     all_checkpoint_path = args.log_dir_path / "all_ckpts"
     best_checkpoint_path = args.log_dir_path / "best_ckpts"
     tensorboard_path = args.log_dir_path / "tensorboard"
 
+    # Some differences from the MNIST example is that we need to handle external
+    # resources like WPM vocabulary and feature normalizers.
     wpm_vocab = asrio.WpmVocab.load(args.wpm_vocab, size_limit=args.wpm_size_limit)
     normalizer = None
     if args.feature_normalizer is not None:
         with open(args.feature_normalizer) as f:
+            # One can use `bobbin.parse_pytree_json` for reading some artifacts
+            # serialized using `bobbin.dump_pyree_json`.
             normalizer = bobbin.parse_pytree_json(
                 f.read(), asrio.MeanVarNormalizer.empty()
             )
 
-    batch_size, *speech_shape = train_ds.element_spec["speech"].shape
-    global_batch_size = batch_size * jax.process_count()
-
+    # Here, we configure model, optimizer, and tasks.
     model = CtcAsrModel(num_outputs=len(wpm_vocab), feature_normalizer=normalizer)
     tx, learn_rate_fn = make_tx()
     task = CtcAsrTask(model, learn_rate_fn, speech_shape)
     evaler = EvalTask(model, wpm_vocab)
-    eval_batch_gens = {dsname: ds.as_numpy_iterator for dsname, ds in eval_dss.items()}
+
+    # init must be deterministic for multi-host training
     train_state = task.initialize_train_state(
         jax.random.PRNGKey(0), tx, checkpoint_path=all_checkpoint_path
     )
     train_state = flax.jax_utils.replicate(train_state, jax.local_devices())
+    # As explained in Jax's multi-process training document
+    # (https://jax.readthedocs.io/en/latest/multi_process.html), multi-process
+    # training doesn't need any modification on the model if the function is
+    # pmapped and `jax.lax.p*` functions are properly used.
+    # So, here `pmap` is necessary.
     train_step_fn = task.make_training_step_fn(
         split_steps=args.split_training_batch
     ).pmap("batch")
 
-    # init must be deterministic for multi-host training
     prng_key = jax.random.PRNGKey(jax.process_index() + 3)
 
     train_writer = (
@@ -624,6 +761,12 @@ def main(args: argparse.Namespace):
     eval_freq = num_train_samples // global_batch_size
     warmup = 10
     crontab = bobbin.CronTab()
+
+    # Here, it is important to know which process does what. For evaluation, we
+    # use multiple processes and therefore it involves "pmap". For such action,
+    # we need to register the same action in all the host involved. For other
+    # I/O related actions, we shouldn't do that in the follower processes for
+    # avoiding overwrite.
     crontab.schedule(
         evaler.make_cron_action(
             eval_batch_gens, tensorboard_root_path=tensorboard_path
@@ -633,6 +776,8 @@ def main(args: argparse.Namespace):
         ),
         step_interval=eval_freq,
     )
+    # So, except for evaluation action above, every other action is registered
+    # only if `jax.process_index() == 0`.
     if jax.process_index() == 0:
         crontab.schedule(
             task.make_checkpoint_saver(all_checkpoint_path),
@@ -647,6 +792,9 @@ def main(args: argparse.Namespace):
             step_interval=100,
         )
 
+    # So we have N copies of train_state when we run this program with N
+    # processes. However, those should have exactly same values if
+    # `compute_loss` is properly written with using `jax.lax.p*` functions.
     logging.info("MAIN LOOP STARTS with devices %s", str(jax.local_devices()))
     for batch in train_ds.as_numpy_iterator():
         rng, prng_key = jax.random.split(prng_key)
