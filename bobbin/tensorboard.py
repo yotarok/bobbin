@@ -19,6 +19,7 @@ import abc
 import functools
 import logging
 import sys
+import typing
 from typing import Any, Callable, Dict, Iterable, Optional, Tuple
 
 import chex
@@ -108,7 +109,7 @@ class MultiDirectorySummaryWriter(flax_tb.SummaryWriter):
         allow_new_keys: bool = True,
         only_from_leader_process: bool = True,
         auto_flush: bool = True,
-        tag_to_key: Callable[[str], str] = _default_key_from_tag,
+        tag_to_key: Callable[[str], Tuple[str, str]] = _default_key_from_tag,
         dirname: Callable[[str], str] = _default_dirname_from_key,
     ):
         """Constructs `MultiDirectorySummaryWriter`.
@@ -156,7 +157,7 @@ class MultiDirectorySummaryWriter(flax_tb.SummaryWriter):
         if key not in self._writers:
             if self._allow_new_keys:
                 if self._use_null:
-                    writer = NullSummaryWriter()
+                    writer = typing.cast(flax_tb.SummaryWriter, NullSummaryWriter())
                 else:
                     writer = flax_tb.SummaryWriter(
                         self._log_dir_root / self._dirname_fn(key),
