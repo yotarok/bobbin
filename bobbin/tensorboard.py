@@ -365,7 +365,7 @@ def publish_trainer_env_info(
     - The numbers of parameters and extra variables in the model.
     - Shape information of the parameter tree.
     - `str(jax.local_devices())`
-    - List of `sys.argv`s.
+    - List of `sys.argv` elements.
 
     Args:
       writer: An instance of `flax.metrics.tensorboard.SummaryWriter`.
