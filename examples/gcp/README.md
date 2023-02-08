@@ -1,7 +1,7 @@
 # GCP setup example
 
-This document shows how to run example script for LibriSpeech training on
-TPU-VM in a distributed setting.
+This document explains how to run the example script for LibriSpeech training
+on TPU-VM in a distributed setting.
 
 For completing the process described in this doc, you will need:
 
@@ -13,16 +13,17 @@ For completing the process described in this doc, you will need:
 
 ## Setup client environment
 
-The configuration is provided as an Ansible playbook. Therefore, you need
-Ansible for proceeding. In Ubuntu, Ansible can be installed via the following
+The configuration is provided as an [Ansible](https://www.ansible.com/)
+playbook. Therefore, you need to install Ansible for proceeding the process
+described below. For Ubuntu Linux, Ansible can be installed by the following
 command:
 
 ```
 sudo apt install ansible
 ```
 
-The required python packages for client processing can be installed to venv by
-running the following script.
+The additional required python packages can be installed to venv by running
+the following script.
 
 ```
 # Hereafter, all command-line snippets below assumes that the current working
@@ -31,15 +32,15 @@ running the following script.
 source devenv/bin/activate
 ```
 
-You only need to setup client once, however, whenever you close the shell and
-return to work on this later, you have to call `source devenv/bin/activate` for
-entering to the venv.
+You only need to set up the client once; however, whenever you close the shell
+and return to work on this later, you have to call `source devenv/bin/activate`
+for entering to the venv.
 
 ## Dataset preparation (LibriSpeech specific)
 
 For LibriSpeech dataset, it is strongly recommended to use a pre-built dataset
 directory. For building the dataset directory, you need to create a GCS bucket
-(here denoted as "DATASET\_BUCKET"), and do the following command.
+(here denoted as "DATASET\_BUCKET"), and enter the following command.
 
 ```
 tfds build --data_dir gs://DATASET_BUCKET/tensorflow_datasets \
@@ -48,7 +49,7 @@ tfds build --data_dir gs://DATASET_BUCKET/tensorflow_datasets \
 
 ## GCP configuration
 
-First, you need to log in to GCP with the following command:
+First, you need to log in to your GCP account with the following command:
 
 ```
 gcloud auth application-default login
@@ -67,7 +68,7 @@ For configuring "ZONE" and "TPUTYPE", you must check [TPU regions and
 zones](https://cloud.google.com/tpu/docs/regions-zones) for availability.
 One possible setup is "v2-32" for "TPUTYPE" and "us-central1-a" for "ZONE".
 
-Here, we selected "node\_name=bobbin-tpu" this is also a configurable variable
+Here, we specified "node\_name=bobbin-tpu". This is also a configurable variable
 that you can choose your favorite name.
 
 ## Run LibriSpeech experiments
