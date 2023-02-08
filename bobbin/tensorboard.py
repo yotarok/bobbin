@@ -80,7 +80,7 @@ class NullSummaryWriter:
         return f
 
 
-def _default_key_from_tag(tag: str) -> str:
+def _default_key_from_tag(tag: str) -> Tuple[str, str]:
     key, rest = tag.split("/", maxsplit=1)
     return key, rest
 
@@ -182,7 +182,7 @@ class MultiDirectorySummaryWriter(flax_tb.SummaryWriter):
         for unused_name, writer in self._writers.items():
             writer.flush()
 
-    def _find_writer_by_tag(self, tag: str) -> flax_tb.SummaryWriter:
+    def _find_writer_by_tag(self, tag: str) -> Tuple[flax_tb.SummaryWriter, str]:
         key, tag = self._key_fn(tag)
         return self.subwriter(key), tag
 
