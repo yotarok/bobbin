@@ -49,7 +49,8 @@ def _add_annotations_import(path):
         # not insert a newline such that source code locations are accurate (we link
         # to GitHub). The assertion above ensures that the first line in the file is
         # a comment so it is safe to prefix it.
-        f.write("from __future__ import annotations  ")
+        if "from __future__ import annotations" not in contents:
+            f.write("from __future__ import annotations  ")
         f.write(contents)
 
 
