@@ -92,8 +92,8 @@ class CNNDenseClassifier(nn.Module):
         cnn_var = jnp.var(x)
 
         # Here, a bobbin specific data-structure is introduced. `bobbin.*Sow`
-        # classes are used to intermediate variable so it can be retrieved and
-        # published to TensorBoard afterwards. In this example, means and
+        # classes are used to wrap intermediate variable so it can be retrieved
+        # and published to TensorBoard afterwards. In this example, means and
         # variances of CNN outputs are collected (even though this is a bit
         # meaningless in practice).
         self.sow("tensorboard", "cnn_mean", bobbin.ScalarSow(cnn_mean))
@@ -120,10 +120,13 @@ class CNNDenseClassifier(nn.Module):
         return x
 
 
-# bobbin does not support dataset inputs. Therefore, it's client responsibility
-# to prepare datasets in a right way. Since bobbin always assumes a dataset to
-# be a iterator of batches represented in numpy arrays, diverse dataset
-# libraries, including tf.data and TFDS can be used.
+# bobbin does not support dataset inputs. Therefore, it's clients'
+# responsibility to prepare datasets in a right way. Since bobbin uses datasets
+# represented as iterators of batches (numpy arrays), many dataset libraries,
+# including tf.data and TFDS can be integrated. (In other words, bobbin does
+# not provide functionalities that relies on meta-information of datasets, and
+# if you want to do something depending on meta-data, this must be done
+# explicitly in the clients' code.)
 def preprocess_ds(
     ds: tf.data.Dataset, *, batch_size: int, is_training: bool = False
 ) -> tf.data.Dataset:
@@ -157,11 +160,10 @@ def get_datasets(
     return train_ds, eval_dss
 
 
-# Here, bobbin "evaluation" library ask you to design evaluation results
-# (metrics) to be a frozen data-class (flax struct).  Evaluation task will
-# compute an instance of a subclass of `bobbin.EvalResults` (here,
-# `EvalResults`), and computed `EvalResults`s are reduced over batches by using
-# `EvalResults.reduce`.
+# Here, bobbin evaluation infrastructure asks you to design evaluation results
+# (metrics) as a frozen data-class (flax struct).  Evaluation task will compute
+# an instance of a subclass of `bobbin.EvalResults` (here, `EvalResults`), and
+# computed `EvalResults`s are reduced over batches by using `EvalResults.reduce`.
 @struct.dataclass
 class EvalResults(bobbin.EvalResults):
     # Here, we count the numbers of correct and processed samples, and the sum
@@ -174,8 +176,7 @@ class EvalResults(bobbin.EvalResults):
     def accuracy(self) -> float:
         return self.correct_count / self.predict_count
 
-    # This method is required if you want to have a readable log message after
-    # evaluation is finished.
+    # This method is required if you want a readable log message.
     def to_log_message(self) -> str:
         return (
             f"accuracy = {self.correct_count} / {self.predict_count}"
@@ -194,16 +195,15 @@ class EvalResults(bobbin.EvalResults):
         )
 
     # This method is required when we do early stopping. For that, comparison
-    # between two metrics are important, and in example below, we construct a
-    # training loop that keeps the checkpoint for the "best" training state with
-    # regard to this `is_better_than` comparison.
+    # between two metrics are important for keeping "best" parameters. Here,
+    # we compare accuracies of two `EvalResults`.
     def is_better_than(self, other: EvalResults) -> bool:
         return self.accuracy > other.accuracy
 
     # This method defines how `EvalResults` can be published to TensorBoard.
-    # here `current_train_state` is the status of training described deeper
-    # below, and `writer` is `flax.metrics.tensorboard.SummaryWriter` that is
-    # used to publish values to TensorBoard.
+    # here `current_train_state` is the status of training, and `writer` is
+    # `flax.metrics.tensorboard.SummaryWriter` that is used to publish values
+    # to TensorBoard.
     def write_to_tensorboard(
         self,
         current_train_state: bobbin.TrainState,
@@ -213,10 +213,10 @@ class EvalResults(bobbin.EvalResults):
         writer.scalar("accuracy", self.accuracy, step=step)
         writer.scalar("logprobs", self.sum_logprobs / self.predict_count, step=step)
 
-    # See API reference doc for details of `EvalResults`. But, please note that
+    # See API reference doc for details of `EvalResults`. Please note that
     # this class is only needed when you use evaluation functionality provided
-    # by bobbin, and bobbin is a sparsely-connected set of small parts which
-    # you can always choose not to use some parts.
+    # by bobbin, and bobbin is designed to be a sparsely-connected set of small
+    # parts which you can always choose to use, or not to use.
 
 
 # How to compute `EvalResults` above is defined here as a subclass of
@@ -232,10 +232,10 @@ class EvalTask(bobbin.EvalTask):
     # This function `bobbin.EvalTask.evaluate` is the main part of evaluation
     # logic.  The function must be overriden to compute `EvalResults` for the
     # input batch `batch` and model variables `model_vars`.  Here, `evaluate`
-    # is wrapped by `tpmap` decolator for multi-device parallelism. See API
-    # document for `tpmap` for details. It should be noted that it runs
-    # perfectly without this decolator except for that only single device
-    # will be used.
+    # is wrapped by `tpmap` decolator for performing multi-device parallel
+    # computation. See API document for `tpmap` for details. It should be noted
+    # that it runs perfectly without this decolator except for that only single
+    # device will be used.
     @functools.partial(
         bobbin.tpmap,
         axis_name="batch",
@@ -307,9 +307,10 @@ class ClassificationTask(bobbin.TrainTask):
         # passed separately.  So few lines needed to merge them.
         model_vars = extra_vars.copy()
         # Here, we also reset variables in "tensorboard" collection.
-        # Because `nn.Module.sow` in flax constructs tuples of SoW variables
-        # when it is called several times. We need to reset tensorboard SoWs for
-        # avoiding those variables to be accumulated over several steps.
+        # Because `nn.Module.sow` in flax constructs tuples of intermediate
+        # variables when it is called multiple times. We need to reset
+        # tensorboard variables for avoiding those intermediate variables to be
+        # accumulated over several steps.
         model_vars.update(params=params, tensorboard=dict())
 
         # The main part of loss starts here.
@@ -426,8 +427,8 @@ def main(args: argparse.Namespace):
     crontab.schedule(
         task.make_log_writer(), time_interval=10.0, at_first_steps_of_process=warmup
     )
-    # This entry in crontab means that, for each 100 steps, training SoWs will
-    # be published to TensorBoard.
+    # This entry in crontab means that, for each 100 steps, training summary
+    # variables will be published to TensorBoard.
     crontab.schedule(bobbin.PublishTrainingProgress(train_writer), step_interval=100)
 
     # The rest of this program is fairly easy.
