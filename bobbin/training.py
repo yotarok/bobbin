@@ -259,6 +259,7 @@ class BaseTrainTask:
         *,
         extra_vars: VarCollection,
         prng_key: PRNGKey,
+        step: Scalar,
     ) -> LossFnResult:
         """Abstract method to be overridden for defining the loss function."""
         raise NotImplementedError()

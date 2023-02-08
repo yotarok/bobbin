@@ -227,6 +227,7 @@ class EvalResultsPublisherTest(chex.TestCase):
             "/dummy/root_dir", keys=("sub1", "sub2")
         )
 
+        # pytype: disable=attribute-error
         def reset():
             for s in ("sub1", "sub2"):
                 writer.subwriter(s).reset_mock()
@@ -291,6 +292,7 @@ class EvalResultsPublisherTest(chex.TestCase):
             "array", image, 234, metadata=audio
         )
         reset()
+        # pytype: enable=attribute-error
 
 
 @mock.patch("logging.log")

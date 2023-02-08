@@ -14,12 +14,14 @@
 """Tests for training.
 """
 
+import typing
 import unittest
 
 from absl.testing import absltest
 import chex
 import flax
 import flax.linen as nn
+import logging
 import numpy as np
 import jax
 import jax.numpy as jnp
@@ -78,7 +80,9 @@ class LogisticRegressionTask(training.TrainTask):
         inputs, labels = batch
         model_vars = extra_vars.copy()
         model_vars.update(params=params)
-        pred = self.model.apply(model_vars, inputs, rngs=self.get_rng_dict())
+        pred = self.model.apply(
+            model_vars, inputs, rngs=self.get_rng_dict(jax.random.PRNGKey(0))
+        )
         return -jax.nn.log_sigmoid(labels * pred)
 
 
@@ -179,8 +183,8 @@ class StepFunctionTest(chex.TestCase):
 
 class TrainTaskTest(chex.TestCase):
     def test_log_writer_creation(self):
-        stub_logger = "unused_logger_object"
-        loglevel = "unused_loglevel"
+        stub_logger = typing.cast(logging.Logger, "unused_logger_object")
+        loglevel = 3
         task = SgdMeanEstimation()
         task.write_trainer_log = unittest.mock.MagicMock()
         writer = task.make_log_writer(logger=stub_logger, loglevel=loglevel)
