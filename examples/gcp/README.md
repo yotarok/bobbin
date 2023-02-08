@@ -36,7 +36,7 @@ You only need to set up the client once; however, whenever you close the shell
 and return to work on this later, you have to call `source devenv/bin/activate`
 for entering to the venv.
 
-## Dataset preparation (LibriSpeech specific)
+## Dataset preparation
 
 For LibriSpeech dataset, it is strongly recommended to use a pre-built dataset
 directory. For building the dataset directory, you need to create a GCS bucket
