@@ -27,21 +27,27 @@ from flax import linen as nn
 from flax import struct
 from flax.training import checkpoints
 import flax.training.train_state
+import flax.metrics.tensorboard as flax_tb
 import jax
 import jax.numpy as jnp
 import logging
 import numpy as np
 import optax
+import time
 
 from .array_util import split_leading_axis
 
 from .pmap_util import assert_replica_integrity
 from .pmap_util import tpmap
 
+from .tensorboard import publish_train_intermediates
+
 from .pytypes import Batch
 from .pytypes import Parameter
 from .pytypes import VarCollection
 
+
+Action = Callable
 ArrayTree = chex.ArrayTree
 Scalar = chex.Scalar
 PRNGKey = chex.PRNGKey
@@ -204,6 +210,45 @@ class TrainingStepFnBuilder(TrainingStepFn):
         return self.compiled_fn(*args, **kwargs)
 
 
+class PublishTrainingProgress:
+    """Action that publishes training intermediates and training throughput."""
+
+    def __init__(
+        self,
+        writer: flax_tb.SummaryWriter,
+        summary_collections: Iterable[str] = ("tensorboard",),
+    ):
+        self.writer = writer
+        self.summary_collections = tuple(summary_collections)
+        self.last_fired_time = None
+        self.last_fired_step = None
+
+    def __call__(
+        self, train_state: flax.training.train_state.TrainState, **unused_kwargs
+    ):
+        if not isinstance(train_state, TrainState):
+            raise ValueError(
+                "`PublishTrainingProgress` action must be used with `bobbin.TrainState`"
+            )
+        cur_time = time.time()
+        if self.last_fired_time is not None and self.last_fired_step is not None:
+            wall_time = cur_time - self.last_fired_time
+            nsteps = train_state.step - self.last_fired_step
+            steps_per_sec = nsteps / wall_time
+            self.writer.scalar(
+                "trainer/steps_per_sec", steps_per_sec, step=train_state.step
+            )
+
+        for colname in self.summary_collections:
+            if colname not in train_state.extra_vars:
+                continue
+            publish_train_intermediates(
+                self.writer, train_state.extra_vars[colname], train_state.step
+            )
+        self.last_fired_time = cur_time
+        self.last_fired_step = train_state.step
+
+
 class BaseTrainTask:
     """Base class defining training task."""
 
@@ -311,14 +356,31 @@ class BaseTrainTask:
 
     def make_log_writer(
         self, *, logger: Optional[logging.Logger] = None, loglevel: int = logging.INFO
-    ):
-        """Make logging action that can be registered in `CronTab`."""
+    ) -> Action:
+        """Makes logging action that can be registered in `CronTab`."""
         if logger is None:
             logger = logging.root
 
         return functools.partial(
             self.write_trainer_log, logger=logger, loglevel=loglevel
         )
+
+    def make_checkpoint_saver(self, checkpoint_path: str):
+        """Makes an action that saves checkpoint in the specified path."""
+
+        # In future, this save can be overridable for supporting task-specific
+        # checkpointing configuration.
+        def save(train_state: TrainState, **unused_kwargs):
+            checkpoints.save_checkpoint(checkpoint_path, train_state, train_state.step)
+
+        return save
+
+    def make_training_progress_publisher(
+        self,
+        writer: flax_tb.SummaryWriter,
+        summary_collections: Iterable[str] = ("tensorboard",),
+    ):
+        return PublishTrainingProgress(writer, summary_collections)
 
 
 class TrainTask(BaseTrainTask):
