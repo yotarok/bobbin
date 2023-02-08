@@ -115,7 +115,7 @@ class CNNDenseClassifier(nn.Module):
         # Same here. The reason why bobbin needed this special class is to tag
         # some sow-ed variables for TensorBoard. `MplImageSummary`, which is not
         # covered by this example, for example, includes extra padding
-        # idicator variables to handle variable-size images.
+        # indicator variables to handle variable-size images.
         self.sow("tensorboard", "logit_entropy", bobbin.ScalarSummary(logit_entropy))
         return x
 
@@ -230,11 +230,11 @@ class EvalTask(bobbin.EvalTask):
         return EvalResults(correct_count=0, predict_count=0, sum_logprobs=0.0)
 
     # This function `bobbin.EvalTask.evaluate` is the main part of evaluation
-    # logic.  The function must be overriden to compute `EvalResults` for the
+    # logic.  The function must be overridden to compute `EvalResults` for the
     # input batch `batch` and model variables `model_vars`.  Here, `evaluate`
-    # is wrapped by `tpmap` decolator for performing multi-device parallel
+    # is wrapped by `tpmap` decorator for performing multi-device parallel
     # computation. See API document for `tpmap` for details. It should be noted
-    # that it runs perfectly without this decolator except for that only single
+    # that it runs perfectly without this decorator except for that only single
     # device will be used.
     @functools.partial(
         bobbin.tpmap,
@@ -263,7 +263,7 @@ class EvalTask(bobbin.EvalTask):
 
 # A loss function interface for bobbin assumes that the loss function returns an
 # auxiliary data for later use (e.g. logging).  Here, for demonstrating this
-# feature, `LossAuxOut` is defined.  Any pytree (includeing None) can be used as
+# feature, `LossAuxOut` is defined.  Any pytree (including None) can be used as
 # an auxiliary output.
 @struct.dataclass
 class LossAuxOut:
@@ -278,9 +278,9 @@ class LossAuxOut:
 class ClassificationTask(bobbin.TrainTask):
     def __init__(self, model: nn.Module):
         # The constructor of `bobbin.TrainTask` typically requires the following
-        # three aruguments, the first one is `nn.Module` to be optimized. The
+        # three arguments, the first one is `nn.Module` to be optimized. The
         # second one is example input data for `nn.Module` that will be passed
-        # to `model.init` for initializing the variables. The third paramter is
+        # to `model.init` for initializing the variables. The third parameter is
         # the names of variable collections that requires random number
         # generators for training.
         super().__init__(
@@ -392,7 +392,7 @@ def main(args: argparse.Namespace):
     # training state must be device-replicated as follows:
     train_state = flax.jax_utils.replicate(train_state, jax.local_devices())
 
-    # bobbin's evauation functions take a dictionary of generators (functions
+    # bobbin's evaluation functions take a dictionary of generators (functions
     # that return iterators) as a source of test data.  Here, we convert
     # `tf.data.Dataset`s to the generators.
     eval_batch_gens = {dsname: ds.as_numpy_iterator for dsname, ds in eval_dss.items()}
@@ -448,7 +448,7 @@ if __name__ == "__main__":
     logging.basicConfig(stream=sys.stderr)
     logging.root.setLevel(logging.INFO)
 
-    # Disable TF's memory preallocation if TF is built with CUDA.
+    # Disable TF's memory pre-allocation if TF is built with CUDA.
     tf.config.experimental.set_visible_devices([], "GPU")
 
     argparser = argparse.ArgumentParser(description="MNIST training")
