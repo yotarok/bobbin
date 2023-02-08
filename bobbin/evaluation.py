@@ -19,10 +19,26 @@ from __future__ import annotations
 
 import collections
 import logging
-from typing import Any, Callable, Dict, Generic, Iterable, Iterator, Tuple, TypeVar
+import os
+from typing import (
+    Any,
+    Callable,
+    Dict,
+    Generic,
+    Iterable,
+    Iterator,
+    Mapping,
+    Optional,
+    Tuple,
+    TypeVar,
+    Union,
+)
 
+from etils import epath
+import flax
 from flax import struct
 from flax.metrics import tensorboard as flax_tb
+from flax.training import checkpoints
 import jax
 import numpy as np
 
@@ -30,10 +46,15 @@ from .pmap_util import gather_from_jax_processes
 from .pmap_util import unshard
 from .pytypes import Batch
 from .pytypes import BatchGen
+from .tensorboard import MultiDirectorySummaryWriter
 from .training import TrainState
+from .var_util import read_pytree_json_file
+from .var_util import write_pytree_json_file
 
 
 T = TypeVar("T")
+Action = Callable
+BaseTrainState = flax.training.train_state.TrainState
 
 
 @struct.dataclass
@@ -96,6 +117,111 @@ class EvalResults:
 EvalResultProcessorFn = Callable[[Dict[str, EvalResults], TrainState], Any]
 
 
+class RunEval:
+    """Action that runs evaluation processes."""
+
+    def __init__(
+        self,
+        eval_task: EvalTask,
+        eval_batch_gens: Mapping[str, Iterator[Batch]],
+        tensorboard_root_path: Union[None, str, os.PathLike[str]] = None,
+    ):
+        self._eval_task = eval_task
+        self._eval_batch_gens = eval_batch_gens
+        self._result_processors = []
+
+        if tensorboard_root_path is not None:
+            writer = MultiDirectorySummaryWriter(
+                tensorboard_root_path, keys=eval_batch_gens.keys()
+            )
+            self.add_result_processor(writer.as_result_processor())
+
+    def __call__(self, train_state: BaseTrainState, **unused_kwargs):
+        if not isinstance(train_state, TrainState):
+            raise ValueError("`RunEval` action must be used with `bobbin.TrainState`")
+
+        eval_results = eval_datasets(
+            self._eval_task, self._eval_batch_gens, train_state.model_vars
+        )
+        for dsname, results in eval_results.items():
+            logging.info(
+                "Evaluation results for dataset=%s @step=%d\n%s",
+                dsname,
+                train_state.step,
+                results.to_log_message(),
+            )
+
+        for proc in self._result_processors:
+            proc(eval_results, train_state)
+
+        return eval_results
+
+    def keep_best_checkpoint(self, tune_on: str, dest_path: str):
+        return RunEvalKeepBest(self, tune_on, dest_path)
+
+    def add_result_processor(self, f: EvalResultProcessorFn):
+        self._result_processors.append(f)
+        return self
+
+
+def _try_deserialize_eval_results(
+    path: os.PathLike, template: EvalResults
+) -> Optional[EvalResults]:
+    try:
+        return read_pytree_json_file(path, template)
+    except Exception:
+        pass
+    return None
+
+
+@struct.dataclass
+class RunEvalKeepBestResult:
+    """Data class for return values of `RunEvalKeepBest` action."""
+
+    eval_results: dict[str, EvalResults]
+    current_best: Optional[EvalResults]
+    saved_train_state: Optional[TrainState]
+
+
+class RunEvalKeepBest:
+    """Action that runs evaluation and saves the best checkpoint."""
+
+    def __init__(
+        self, run_eval_action: Action, tune_on: str, dest_path: Union[str, os.PathLike]
+    ):
+        self._run_eval_action = run_eval_action
+        self._tune_on = tune_on
+        self._dest_path = epath.Path(dest_path)
+        self._current_best = None
+        self._results_path = self._dest_path / "results.json"
+
+    def __call__(self, train_state, **kwargs):
+        eval_results = self._run_eval_action(train_state, **kwargs)
+
+        result = eval_results[self._tune_on]
+        saved_train_state = None
+        if self._current_best is None and jax.process_index() == 0:
+            # Try loading
+            self._current_best = _try_deserialize_eval_results(
+                self._results_path, result
+            )
+
+        if self._current_best is None or result.is_better_than(self._current_best):
+            self._current_best = result
+
+            if jax.process_index() == 0:
+                checkpoints.save_checkpoint(
+                    self._dest_path, train_state, train_state.step, overwrite=True
+                )
+                write_pytree_json_file(self._results_path, result)
+            saved_train_state = train_state
+        return RunEvalKeepBestResult(
+            eval_results=eval_results,
+            current_best=self._current_best,
+            saved_train_state=saved_train_state,
+        )
+
+
 class EvalTask:
     """Base class defining evaluation task."""
 
@@ -112,6 +238,15 @@ class EvalTask:
         Finalize eval metrics before it is stored or published to tensorboard.
         """
         return metrics
+
+    def make_cron_action(
+        self,
+        batch_gens: Mapping[str, BatchGen],
+        *,
+        tensorboard_root_path: Union[None, str, os.PathLike[str]],
+    ) -> Action:
+        """Make cron action function for running the evaluation."""
+        return RunEval(self, batch_gens, tensorboard_root_path=tensorboard_root_path)
 
 
 def eval_batches(

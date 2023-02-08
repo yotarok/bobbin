@@ -625,9 +625,9 @@ def main(args: argparse.Namespace):
     warmup = 10
     crontab = bobbin.CronTab()
     crontab.schedule(
-        bobbin.RunEval(
-            evaler, eval_batch_gens, tensorboard_root_path=tensorboard_path
-        ).and_keep_best_checkpoint(
+        evaler.make_cron_action(
+            eval_batch_gens, tensorboard_root_path=tensorboard_path
+        ).keep_best_checkpoint(
             "dev",
             best_checkpoint_path,
         ),

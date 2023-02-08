@@ -21,6 +21,7 @@ import unittest
 from absl.testing import absltest
 import chex
 import flax
+from flax import struct
 import jax
 import numpy as np
 
@@ -167,6 +168,79 @@ class SampledSetTest(chex.TestCase):
             s = s.union(range(n))
 
         np.testing.assert_equal(tuple(s), (3, 2, 2, 1, 1))
+
+
+@struct.dataclass
+class LowerIsBetter(evaluation.EvalResults):
+    value: float
+
+    def is_better_than(self, other):
+        return self.value < other.value
+
+
+class RunEvalKeepBestActionTest(chex.TestCase):
+    @unittest.mock.patch("bobbin.evaluation.read_pytree_json_file")
+    @unittest.mock.patch("bobbin.evaluation.write_pytree_json_file")
+    @unittest.mock.patch("flax.training.checkpoints.save_checkpoint")
+    def test_normal_sequence(self, save_checkpoint, write_json, read_json):
+        run_eval = unittest.mock.MagicMock()
+        dest = "gs://example_bucket/log/best"
+        result_url = dest + "/results.json"
+        action = evaluation.RunEvalKeepBest(run_eval, tune_on="dev", dest_path=dest)
+
+        train_state = unittest.mock.MagicMock()
+        run_eval.return_value = dict(dev=LowerIsBetter(2.0))
+        read_json.side_effect = FileNotFoundError()
+        action(train_state)
+        write_json.assert_called_once()
+        dest_path, wrote_metric = write_json.call_args.args
+        np.testing.assert_equal(dest_path.as_uri(), result_url)
+        np.testing.assert_equal(wrote_metric.value, 2.0)
+        write_json.reset_mock()
+        read_json.reset_mock()
+
+        # Another evaluation results that are not better coming in.
+        run_eval.return_value = dict(dev=LowerIsBetter(3.0))
+        read_json.side_effect = None
+        read_json.return_value = LowerIsBetter(2.0)
+        action(train_state)
+        write_json.assert_not_called()
+        read_json.assert_not_called()
+
+        # Training restarted.
+        action = evaluation.RunEvalKeepBest(run_eval, tune_on="dev", dest_path=dest)
+        run_eval.return_value = dict(dev=LowerIsBetter(3.0))
+        action(train_state)
+        read_json.assert_called_once()
+        src, tree = read_json.call_args.args
+        np.testing.assert_equal(src.as_uri(), result_url)
+
+    @unittest.mock.patch("jax.process_index")
+    @unittest.mock.patch("jax.process_count")
+    @unittest.mock.patch("bobbin.evaluation.read_pytree_json_file")
+    @unittest.mock.patch("bobbin.evaluation.write_pytree_json_file")
+    @unittest.mock.patch("flax.training.checkpoints.save_checkpoint")
+    def test_no_io_in_follower_processes(
+        self, save_checkpoint, write_json, read_json, process_count, process_index
+    ):
+        process_count.return_value = 4
+        process_index.return_value = 2
+        run_eval = unittest.mock.MagicMock()
+        dest = "gs://example_bucket/log/best"
+        action = evaluation.RunEvalKeepBest(run_eval, tune_on="dev", dest_path=dest)
+
+        train_state = unittest.mock.MagicMock()
+        run_eval.return_value = dict(dev=LowerIsBetter(2.0))
+        action(train_state)
+        write_json.assert_not_called()
+        read_json.assert_not_called()
+        save_checkpoint.assert_not_called()
+
+        run_eval.return_value = dict(dev=LowerIsBetter(1.0))
+        action(train_state)
+        write_json.assert_not_called()
+        read_json.assert_not_called()
+        save_checkpoint.assert_not_called()
 
 
 if __name__ == "__main__":

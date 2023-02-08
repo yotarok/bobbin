@@ -19,7 +19,7 @@ import abc
 import functools
 import logging
 import sys
-from typing import Callable, Dict, Iterable, Optional, Tuple
+from typing import Any, Callable, Dict, Iterable, Optional, Tuple
 
 import chex
 from etils import epath
@@ -32,8 +32,6 @@ import matplotlib.pyplot as plt
 import numpy as np
 
 from .training import TrainState as BobbinTrainState
-from .evaluation import EvalResults
-from .evaluation import EvalResultProcessorFn
 from .var_util import flatten_with_paths
 from .var_util import summarize_shape
 from .var_util import total_dimensionality
@@ -41,6 +39,8 @@ from .var_util import total_dimensionality
 ArrayTree = chex.ArrayTree
 TrainState = flax.training.train_state.TrainState
 
+EvalResults = Any
+EvalResultProcessorFn = Callable[[Dict[str, EvalResults], TrainState], Any]
 WriteEvalResultsFn = Callable[[EvalResults, TrainState, flax_tb.SummaryWriter], None]
 
 
