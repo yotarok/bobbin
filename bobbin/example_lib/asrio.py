@@ -437,7 +437,7 @@ def remove_ctc_blanks_and_repeats(
     *,
     blank_id: int = 0,
     use_jnp: bool = False,
-) -> Sequence[int]:
+) -> List[List[int]]:
     """Applies the CTC blank removal rule.
 
     Args:

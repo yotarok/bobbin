@@ -388,7 +388,7 @@ def publish_trainer_env_info(
 
     num_params = total_dimensionality(train_state.params)
     s = f"Number of parameters = {num_params}"
-    if hasattr(train_state, "extra_varsBobbinTrainState"):
+    if hasattr(train_state, "extra_vars"):
         num_extra_vars = total_dimensionality(train_state.extra_vars)
         s += f", number of extra variables = {num_extra_vars}"
     write_text(prefix + "total_num_params", s)
