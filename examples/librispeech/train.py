@@ -218,7 +218,7 @@ class CtcAsrModel(nn.Module):
         self.sow(
             "tensorboard",
             "features",
-            bobbin.MplImageSow(
+            bobbin.MplImageSummary(
                 features[0].T,
                 aspect="auto",
                 origin="lower",
@@ -232,7 +232,7 @@ class CtcAsrModel(nn.Module):
         self.sow(
             "tensorboard",
             "masked_features",
-            bobbin.MplImageSow(
+            bobbin.MplImageSummary(
                 features[0].T,
                 aspect="auto",
                 origin="lower",
@@ -278,7 +278,7 @@ class CtcAsrTask(bobbin.TrainTask):
         self, params, batch, *, extra_vars, prng_key, step
     ) -> Tuple[chex.Scalar, Tuple[VarCollection, LossAuxOut]]:
         model_vars = extra_vars.copy()
-        # Update params, and clear tensorboard SoWs.
+        # Update params, and clear tensorboard summaries in the previous step.
         model_vars.update(params=params, tensorboard=dict())
         (logits, logit_paddings), updated_vars = self._model.apply(
             model_vars,
@@ -297,8 +297,8 @@ class CtcAsrTask(bobbin.TrainTask):
 
         loss = jnp.mean(per_token_loss)
         tb_vars = updated_vars["tensorboard"].unfreeze()
-        tb_vars["loss"] = bobbin.ScalarSow(loss)
-        tb_vars["learn_rate"] = bobbin.ScalarSow(self._learn_rate_fn(step))
+        tb_vars["loss"] = bobbin.ScalarSummary(loss)
+        tb_vars["learn_rate"] = bobbin.ScalarSummary(self._learn_rate_fn(step))
         updated_vars = updated_vars.copy(dict(tensorboard=tb_vars))
         return loss, (
             updated_vars,

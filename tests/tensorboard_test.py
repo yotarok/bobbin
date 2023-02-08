@@ -27,7 +27,7 @@ import bobbin
 from bobbin import tensorboard
 
 
-class TrainSowPublisherTest(chex.TestCase):
+class TrainSummaryPublisherTest(chex.TestCase):
     def test_default(self):
         variables = {
             "params": {
@@ -40,8 +40,8 @@ class TrainSowPublisherTest(chex.TestCase):
             "tensorboard": {
                 "layers": (
                     {
-                        "mean_output": tensorboard.ScalarSow(1.23),
-                        "var_output": tensorboard.ScalarSow(2.46),
+                        "mean_output": tensorboard.ScalarSummary(1.23),
+                        "var_output": tensorboard.ScalarSummary(2.46),
                     },
                 )
             },
@@ -49,28 +49,28 @@ class TrainSowPublisherTest(chex.TestCase):
         writer = mock.create_autospec(flax_tb.SummaryWriter)
         tensorboard.publish_train_intermediates(writer, variables["tensorboard"], 123)
         print(writer.scalar.call_args_list)
-        writer.scalar.assert_any_call("sow/layers/0/mean_output", 1.23, step=123)
-        writer.scalar.assert_any_call("sow/layers/0/var_output", 2.46, step=123)
+        writer.scalar.assert_any_call("summary/layers/0/mean_output", 1.23, step=123)
+        writer.scalar.assert_any_call("summary/layers/0/var_output", 2.46, step=123)
 
     def test_image(self):
         image = np.random.uniform(size=(13, 13, 3))
-        tb_vars = dict(x=tensorboard.ImageSow(image=image))
+        tb_vars = dict(x=tensorboard.ImageSummary(image=image))
         writer = mock.create_autospec(flax_tb.SummaryWriter)
         tensorboard.publish_train_intermediates(writer, tb_vars, 123)
-        writer.image.assert_any_call("sow/x", image, step=123)
+        writer.image.assert_any_call("summary/x", image, step=123)
 
     def test_mpl_image(self):
         data = np.random.uniform(size=(17, 11))
         h_paddings = (np.arange(11) >= 7).astype(np.float32)
         v_paddings = (np.arange(17) >= 11).astype(np.float32)
         tb_vars = dict(
-            x=tensorboard.MplImageSow(
+            x=tensorboard.MplImageSummary(
                 image=data, h_paddings=h_paddings, v_paddings=v_paddings
             )
         )
         writer = mock.create_autospec(flax_tb.SummaryWriter)
         tensorboard.publish_train_intermediates(writer, tb_vars, 123)
-        writer.image.assert_any_call("sow/x", mock.ANY, step=123)
+        writer.image.assert_any_call("summary/x", mock.ANY, step=123)
 
 
 @flax.struct.dataclass
