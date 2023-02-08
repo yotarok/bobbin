@@ -123,7 +123,7 @@ class RunEval:
     def __init__(
         self,
         eval_task: EvalTask,
-        eval_batch_gens: Mapping[str, Iterator[Batch]],
+        eval_batch_gens: Mapping[str, Callable[[], Iterator[Batch]]],
         tensorboard_root_path: Union[None, str, os.PathLike[str]] = None,
     ):
         self._eval_task = eval_task
@@ -344,8 +344,8 @@ class SampledSet(collections.abc.Collection, Generic[T]):
     """Immutable set containing the fixed number samples from the elements added."""
 
     max_size: int
-    values: Tuple[T] = ()
-    priorities: Tuple[float] = ()
+    values: Tuple[T, ...] = ()
+    priorities: Tuple[float, ...] = ()
 
     def __contains__(self, q: T) -> bool:
         return q in self.values
