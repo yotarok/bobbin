@@ -403,7 +403,7 @@ def main(args: argparse.Namespace):
     # This entry in crontab means that we save checkpoint for train_state for
     # each 1000 steps and after 5 (warmup) steps completed.
     crontab.schedule(
-        bobbin.SaveCheckpoint(all_checkpoint_path),
+        task.make_checkpoint_saver(all_checkpoint_path),
         step_interval=1000,
         at_step=warmup,
     )
@@ -426,7 +426,9 @@ def main(args: argparse.Namespace):
     )
     # This entry in crontab means that, for each 100 steps, training summary
     # variables will be published to TensorBoard.
-    crontab.schedule(bobbin.PublishTrainingProgress(train_writer), step_interval=100)
+    crontab.schedule(
+        task.make_training_progress_publisher(train_writer), step_interval=100
+    )
 
     # The rest of this program is fairly easy.
     logging.info("Main loop started.")

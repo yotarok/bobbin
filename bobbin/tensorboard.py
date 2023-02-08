@@ -31,7 +31,6 @@ import matplotlib
 import matplotlib.pyplot as plt
 import numpy as np
 
-from .training import TrainState as BobbinTrainState
 from .var_util import flatten_with_paths
 from .var_util import summarize_shape
 from .var_util import total_dimensionality
@@ -389,7 +388,7 @@ def publish_trainer_env_info(
 
     num_params = total_dimensionality(train_state.params)
     s = f"Number of parameters = {num_params}"
-    if isinstance(train_state, BobbinTrainState):
+    if hasattr(train_state, "extra_varsBobbinTrainState"):
         num_extra_vars = total_dimensionality(train_state.extra_vars)
         s += f", number of extra variables = {num_extra_vars}"
     write_text(prefix + "total_num_params", s)

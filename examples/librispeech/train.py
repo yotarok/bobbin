@@ -635,7 +635,7 @@ def main(args: argparse.Namespace):
     )
     if jax.process_index() == 0:
         crontab.schedule(
-            bobbin.SaveCheckpoint(all_checkpoint_path),
+            task.make_checkpoint_saver(all_checkpoint_path),
             step_interval=1000,
             at_step=warmup,
         )
@@ -643,7 +643,8 @@ def main(args: argparse.Namespace):
             task.make_log_writer(), time_interval=30.0, at_first_steps_of_process=warmup
         )
         crontab.schedule(
-            bobbin.PublishTrainingProgress(train_writer), step_interval=100
+            task.make_training_progress_publisher(train_writer),
+            step_interval=100,
         )
 
     logging.info("MAIN LOOP STARTS with devices %s", str(jax.local_devices()))

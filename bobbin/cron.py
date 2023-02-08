@@ -31,11 +31,7 @@ from typing import (
 )
 
 import flax
-from flax.metrics import tensorboard as flax_tb
-from flax.training import checkpoints
-
-from .tensorboard import publish_train_intermediates
-from .training import TrainState as BobbinTrainState
+import flax.training.train_state
 
 TrainState = flax.training.train_state.TrainState
 Action = Callable[..., Optional[Tuple[TrainState, ...]]]
@@ -127,53 +123,6 @@ class AtNthStep(Trigger):
 
     def check(self, train_state: TrainState) -> bool:
         return int(train_state.step) in self._ns
-
-
-class SaveCheckpoint:
-    """Action that saves checkpoint."""
-
-    def __init__(self, dest_path: str):
-        self._dest_path = dest_path
-
-    def __call__(self, train_state: TrainState, **unused_kwargs):
-        checkpoints.save_checkpoint(self._dest_path, train_state, train_state.step)
-
-
-class PublishTrainingProgress:
-    """Action that publishes training intermediates and training throughput."""
-
-    def __init__(
-        self,
-        writer: flax_tb.SummaryWriter,
-        summary_collections: Sequence[str] = ("tensorboard",),
-    ):
-        self.writer = writer
-        self.summary_collections = summary_collections
-        self.last_fired_time = None
-        self.last_fired_step = None
-
-    def __call__(self, train_state: TrainState, **unused_kwargs):
-        if not isinstance(train_state, BobbinTrainState):
-            raise ValueError(
-                "`PublishTrainingProgress` action must be used with `bobbin.TrainState`"
-            )
-        cur_time = time.time()
-        if self.last_fired_time is not None and self.last_fired_step is not None:
-            wall_time = cur_time - self.last_fired_time
-            nsteps = train_state.step - self.last_fired_step
-            steps_per_sec = nsteps / wall_time
-            self.writer.scalar(
-                "trainer/steps_per_sec", steps_per_sec, step=train_state.step
-            )
-
-        for colname in self.summary_collections:
-            if colname not in train_state.extra_vars:
-                continue
-            publish_train_intermediates(
-                self.writer, train_state.extra_vars[colname], train_state.step
-            )
-        self.last_fired_time = cur_time
-        self.last_fired_step = train_state.step
 
 
 _SCHEDULE_ARG_PARSER = {
