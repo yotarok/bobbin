@@ -91,13 +91,13 @@ class CNNDenseClassifier(nn.Module):
         cnn_mean = jnp.mean(x)
         cnn_var = jnp.var(x)
 
-        # Here, a bobbin specific data-structure is introduced. `bobbin.*Sow`
-        # classes are used to wrap intermediate variable so it can be retrieved
-        # and published to TensorBoard afterwards. In this example, means and
-        # variances of CNN outputs are collected (even though this is a bit
-        # meaningless in practice).
-        self.sow("tensorboard", "cnn_mean", bobbin.ScalarSow(cnn_mean))
-        self.sow("tensorboard", "cnn_var", bobbin.ScalarSow(cnn_var))
+        # Here, a bobbin specific data-structure is introduced.
+        # `bobbin.*Summary` classes are used to wrap intermediate variable so
+        # it can be retrieved and published to TensorBoard afterwards. In this
+        # example, means and variances of CNN outputs are collected (even
+        # though this is a bit meaningless in practice).
+        self.sow("tensorboard", "cnn_mean", bobbin.ScalarSummary(cnn_mean))
+        self.sow("tensorboard", "cnn_var", bobbin.ScalarSummary(cnn_var))
 
         if self.normalize_cnn_out:
             x = nn.BatchNorm(use_running_average=is_eval)(x)
@@ -112,11 +112,11 @@ class CNNDenseClassifier(nn.Module):
         logit_entropy = -jnp.sum(jax.nn.softmax(x) * jax.nn.log_softmax(x), axis=-1)
         logit_entropy = jnp.mean(logit_entropy)
 
-        # Same here. The reason why bobbin needed this special class is to
-        # annotate some "sow"s for TensorBoard.  MplImageSow, which is not
+        # Same here. The reason why bobbin needed this special class is to tag
+        # some sow-ed variables for TensorBoard. `MplImageSummary`, which is not
         # covered by this example, for example, includes extra padding
         # idicator variables to handle variable-size images.
-        self.sow("tensorboard", "logit_entropy", bobbin.ScalarSow(logit_entropy))
+        self.sow("tensorboard", "logit_entropy", bobbin.ScalarSummary(logit_entropy))
         return x
 
 

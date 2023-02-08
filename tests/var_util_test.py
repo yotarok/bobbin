@@ -79,14 +79,14 @@ class AddressingTest(chex.TestCase):
             params=_FrozenDict(
                 Layers=(
                     _FrozenDict(
-                        sow=_Pair(x=1, y=2),
+                        summary=_Pair(x=1, y=2),
                         params=_FrozenDict(
                             weight=np.random.normal(size=(3,)),
                             bias=np.random.normal(size=(1,)),
                         ),
                     ),
                     _FrozenDict(
-                        sow=_Pair(x=6, y=7),
+                        summary=_Pair(x=6, y=7),
                         params=np.random.normal(size=(3,)),
                     ),
                 )
@@ -96,14 +96,14 @@ class AddressingTest(chex.TestCase):
             params=_FrozenDict(
                 Layers=(
                     _FrozenDict(
-                        sow="/params/Layers/0/sow",
+                        summary="/params/Layers/0/summary",
                         params=_FrozenDict(
                             weight="/params/Layers/0/params/weight",
                             bias="/params/Layers/0/params/bias",
                         ),
                     ),
                     _FrozenDict(
-                        sow="/params/Layers/1/sow",
+                        summary="/params/Layers/1/summary",
                         params="/params/Layers/1/params",
                     ),
                 )
@@ -134,7 +134,7 @@ class AddressingTest(chex.TestCase):
                 self.sow(
                     "tensorboard",
                     "random",
-                    tensorboard.MplImageSow(
+                    tensorboard.MplImageSummary(
                         jnp.zeros((3, 3)),
                         aspect="auto",
                         origin="lower",

@@ -245,18 +245,18 @@ class MultiDirectorySummaryWriter(flax_tb.SummaryWriter):
         return f
 
 
-class PublishableSow(metaclass=abc.ABCMeta):
+class PublishableSummary(metaclass=abc.ABCMeta):
     @abc.abstractmethod
     def publish(self, writer: flax_tb.SummaryWriter, tag: str, step: int) -> None:
         ...
 
 
-def _is_publishable_sow(node: ArrayTree) -> bool:
-    return isinstance(node, PublishableSow)
+def _is_publishable_summary(node: ArrayTree) -> bool:
+    return isinstance(node, PublishableSummary)
 
 
 @struct.dataclass
-class ScalarSow(PublishableSow):
+class ScalarSummary(PublishableSummary):
     value: chex.Array
 
     def publish(self, writer: flax_tb.SummaryWriter, tag: str, step: int) -> None:
@@ -264,7 +264,7 @@ class ScalarSow(PublishableSow):
 
 
 @struct.dataclass
-class ImageSow(PublishableSow):
+class ImageSummary(PublishableSummary):
     image: chex.Array
 
     def publish(self, writer: flax_tb.SummaryWriter, tag: str, step: int) -> None:
@@ -272,7 +272,7 @@ class ImageSow(PublishableSow):
 
 
 @struct.dataclass
-class MplImageSow(PublishableSow):
+class MplImageSummary(PublishableSummary):
     image: chex.Array
     h_paddings: Optional[chex.Array] = None
     v_paddings: Optional[chex.Array] = None
@@ -321,7 +321,7 @@ def publish_train_intermediates(
     tree: ArrayTree,
     step: int,
     *,
-    prefix: str = "sow/",
+    prefix: str = "summary/",
 ) -> None:
     """Writes variables specified in the args to SummaryWriter `writer`.
 
@@ -338,8 +338,8 @@ def publish_train_intermediates(
             name used in TensorBoard. By default, tag names are defined as a
             name of last path component without ":scalar" suffix.
     """
-    for path, val in flatten_with_paths(tree, is_leaf=_is_publishable_sow):
-        if not _is_publishable_sow(val):
+    for path, val in flatten_with_paths(tree, is_leaf=_is_publishable_summary):
+        if not _is_publishable_summary(val):
             continue
         val.publish(writer, prefix + path[1:], step=step)
 

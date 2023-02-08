@@ -261,7 +261,7 @@ class SaveCheckpoint:
 
 
 class PublishTrainingProgress:
-    """Action that publishes training SoWs and training throughput."""
+    """Action that publishes training intermediates and training throughput."""
 
     def __init__(
         self,

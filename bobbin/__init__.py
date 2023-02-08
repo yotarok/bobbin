@@ -52,12 +52,12 @@ from .pytypes import BatchGen
 from .pytypes import Parameter
 from .pytypes import VarCollection
 
-from .tensorboard import ImageSow
-from .tensorboard import MplImageSow
+from .tensorboard import ImageSummary
+from .tensorboard import MplImageSummary
 from .tensorboard import NullSummaryWriter
 from .tensorboard import publish_train_intermediates
 from .tensorboard import publish_trainer_env_info
-from .tensorboard import ScalarSow
+from .tensorboard import ScalarSummary
 
 from .training import BaseTrainTask
 from .training import initialize_train_state
