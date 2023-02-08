@@ -412,12 +412,9 @@ def main(args: argparse.Namespace):
     # `EvalResults` will be published to `tensorboard_path`. Also, this keeps
     # the best performing parameters to a separate checkpoint path.
     crontab.schedule(
-        bobbin.RunEval(
-            evaler, eval_batch_gens, tensorboard_root_path=tensorboard_path
-        ).and_keep_best_checkpoint(
-            "dev",
-            best_checkpoint_path,
-        ),
+        evaler.make_cron_action(
+            eval_batch_gens, tensorboard_root_path=tensorboard_path
+        ).keep_best_checkpoint("dev", best_checkpoint_path),
         step_interval=1000,
         at_step=warmup,
     )
