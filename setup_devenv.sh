@@ -21,6 +21,7 @@ source devenv/bin/activate
 pip3 install --upgrade pip
 pip3 install tensorflow
 pip3 install tfds-nightly
+pip3 install tensorflow_io
 pip3 install "jax[cpu]"
 pip3 install flax
 pip3 install fiddle

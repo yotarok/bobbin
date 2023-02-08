@@ -44,7 +44,7 @@
     - name: Collecting SSH endpoints
       ansible.builtin.shell:
         cmd: |
-          gcloud compute tpus tpu-vm describe bobbin-tpu \
+          gcloud compute tpus tpu-vm describe {{ vars.node_name }} \
               --zone {{ vars.zone }} --project {{ vars.project }} \
               --format json \
               | jq '.networkEndpoints[].accessConfig.externalIp' -r
