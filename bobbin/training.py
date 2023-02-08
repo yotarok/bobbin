@@ -390,7 +390,7 @@ class TrainTask(BaseTrainTask):
         self,
         model: nn.Module,
         example_args: Tuple[Any],
-        example_kwargs: Mapping[str, Any] = None,
+        example_kwargs: Optional[Mapping[str, Any]] = None,
         required_rngs: Iterable[str] = (),
     ):
         """Constructs the train task.
@@ -434,7 +434,7 @@ class TrainTask(BaseTrainTask):
         if compile_init is None:
             init_fn = self.model.init
         else:
-            init_fn = self.compile_init_fn(self.model.init)
+            init_fn = compile_init(self.model.init)
 
         return init_fn(
             self.get_rng_dict(rng_key, ("params",)),
