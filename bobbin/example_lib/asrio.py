@@ -356,8 +356,7 @@ def compute_edit_distance(
     return s, d, i
 
 
-@struct.dataclass
-class SequenceError:
+class SequenceError(struct.PyTreeNode):
     """Dataclass containing edit-distance information."""
 
     refs: int = 0
@@ -384,8 +383,7 @@ class SequenceError:
         )
 
 
-@struct.dataclass
-class MeanVarNormalizer:
+class MeanVarNormalizer(struct.PyTreeNode):
     """A dataclass containing mean and variance (stddev) of input features.
 
     Attributes:

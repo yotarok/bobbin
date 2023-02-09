@@ -21,7 +21,6 @@ import unittest
 from absl.testing import absltest
 import chex
 import flax
-from flax import struct
 import jax
 import numpy as np
 
@@ -31,7 +30,6 @@ from bobbin import evaluation
 Batch = bobbin.Batch
 
 
-@flax.struct.dataclass
 class SimpleTreeResults(evaluation.EvalResults):
     value: chex.ArrayTree
 
@@ -52,6 +50,10 @@ class SimpleTreeResults(evaluation.EvalResults):
 
 
 class EvalResultsTest(chex.TestCase):
+    def test_eval_results_are_dataclass(self):
+        results = SimpleTreeResults.test_sample_1()
+        np.testing.assert_("_flax_dataclass" in dir(type(results)))
+
     def test_unshard_and_reduce(self):
         results = SimpleTreeResults.test_sample_1()
         sharded_results = jax.tree_util.tree_map(
@@ -170,7 +172,6 @@ class SampledSetTest(chex.TestCase):
         np.testing.assert_equal(tuple(s), (3, 2, 2, 1, 1))
 
 
-@struct.dataclass
 class LowerIsBetter(evaluation.EvalResults):
     value: float
 

@@ -245,7 +245,7 @@ class MultiDirectorySummaryWriter(flax_tb.SummaryWriter):
         return f
 
 
-class PublishableSummary(metaclass=abc.ABCMeta):
+class PublishableSummary(struct.PyTreeNode, metaclass=abc.ABCMeta):
     @abc.abstractmethod
     def publish(self, writer: flax_tb.SummaryWriter, tag: str, step: int) -> None:
         ...
@@ -255,7 +255,6 @@ def _is_publishable_summary(node: ArrayTree) -> bool:
     return isinstance(node, PublishableSummary)
 
 
-@struct.dataclass
 class ScalarSummary(PublishableSummary):
     value: chex.Array
 
@@ -263,7 +262,6 @@ class ScalarSummary(PublishableSummary):
         writer.scalar(tag, self.value, step=step)
 
 
-@struct.dataclass
 class ImageSummary(PublishableSummary):
     image: chex.Array
 
@@ -271,7 +269,6 @@ class ImageSummary(PublishableSummary):
         writer.image(tag, self.image, step=step)
 
 
-@struct.dataclass
 class MplImageSummary(PublishableSummary):
     image: chex.Array
     h_paddings: Optional[chex.Array] = None

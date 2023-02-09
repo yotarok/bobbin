@@ -73,7 +73,6 @@ class TrainSummaryPublisherTest(chex.TestCase):
         writer.image.assert_any_call("summary/x", mock.ANY, step=123)
 
 
-@flax.struct.dataclass
 class EvalResults(bobbin.evaluation.EvalResults):
     input_norm_counts: np.ndarray
     input_norm_bins: np.ndarray
