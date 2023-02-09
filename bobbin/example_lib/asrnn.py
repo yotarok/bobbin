@@ -28,7 +28,6 @@ import numpy as np
 from bobbin.example_lib import asrio
 
 Array = chex.Array
-ModuleDef = Any
 InitializerFn = Callable[[chex.PRNGKey, chex.Shape, chex.ArrayDType], Array]
 
 
@@ -549,22 +548,20 @@ class CnnConformerEncoder(nn.Module):
     """Encoder module based on CNN followed by multiple Conformer blocks.
 
     Attrbiutes:
-      cnn_def: A function that constructs `CnnEncoder` (or compatible) module.
-      conformer_block_def: A function that constructs `ConformerBlock` (or compatible)
-        module.
+      cnn: linen module that can be called as `self.cnn(x, x_paddings, is_eval)`.
+      conformer_blocks: sequence of linen modules that can be called as
+        `self.conformer_blocks[0](x, x_paddings, is_eval)`.
       conformer_input_dropout_prob: Dropout probability for the input of conformer
         blocks (including positional embeddings added).
-      num_conformer_blocks: The number of Conformer blocks used.
       num_outputs: Output dimensionality.
       is_eval: If True, all internal blocks are configured to be in evaluation mode.
       use_fixed_pos_emb: If True, global positional embeddings are added to the input
         of conformer blocks.
     """
 
-    cnn_def: ModuleDef = CnnEncoder
-    conformer_block_def: ModuleDef = ConformerBlock
+    cnn: nn.Module = CnnEncoder()
+    conformer_blocks: Sequence[nn.Module] = (ConformerBlock(),) * 4
     conformer_input_dropout_prob: float = 0.1
-    num_conformer_blocks: int = 4
     num_outputs: int = 256
     is_eval: Optional[bool] = None
     use_fixed_pos_emb: bool = True
@@ -576,7 +573,7 @@ class CnnConformerEncoder(nn.Module):
         is_eval = nn.merge_param("is_eval", self.is_eval, is_eval)
         _input_padding_validation("CnnConformerEncoder", features, feature_paddings)
 
-        features, feature_paddings = self.cnn_def()(
+        features, feature_paddings = self.cnn(
             features, feature_paddings, is_eval=is_eval
         )
 
@@ -588,8 +585,8 @@ class CnnConformerEncoder(nn.Module):
         if self.conformer_input_dropout_prob > 0 and not is_eval:
             x = nn.Dropout(self.conformer_input_dropout_prob)(x, deterministic=is_eval)
         pad = feature_paddings
-        for unused_conformer_depth in range(self.num_conformer_blocks):
-            x, pad = self.conformer_block_def()(x, pad, is_eval=is_eval)
+        for block in self.conformer_blocks:
+            x, pad = block(x, pad, is_eval=is_eval)
 
         x = nn.Dense(features=self.num_outputs)(x)
         return x, feature_paddings

@@ -24,6 +24,7 @@
 from __future__ import annotations
 
 import argparse
+import copy
 import dataclasses
 from etils import epath
 import functools
@@ -36,6 +37,9 @@ from typing import Any, Dict, Iterable, Optional, Sequence, Tuple
 import urllib.request
 
 import chex
+import fiddle as fdl
+from fiddle import printing
+from fiddle.experimental import auto_config
 import flax
 from flax import struct
 import flax.linen as nn
@@ -227,19 +231,17 @@ def prepare_datasets(
 # `logit_paddings[b, t] == 1`, `logits[b, t, ...]` is padded values, and should
 # not be used. The padding indicators expected to have 0 or 1 values.
 class CtcAsrModel(nn.Module):
-    num_outputs: int
     feature_normalizer: Optional[asrio.MeanVarNormalizer] = None
+    frontend: nn.Module = asrnn.LogMelFilterBank()
+    encoder: nn.Module = asrnn.CnnConformerEncoder()
+    specaug: nn.Module = asrnn.SpecAug()
+    classifier: nn.Module = nn.Dense(-1)
 
-    def setup(self):
-        self._encoder = asrnn.CnnConformerEncoder()
-        self._frontend = asrnn.LogMelFilterBank()
-        self._specaug = asrnn.SpecAug()
-        self._classifier = nn.Dense(features=self.num_outputs)
-
+    @nn.compact
     def __call__(
         self, waveform: Array, waveform_paddings: Array, is_eval: bool = False
     ) -> Tuple[Array, Array]:
-        features, feature_paddings = self._frontend(waveform, waveform_paddings)
+        features, feature_paddings = self.frontend(waveform, waveform_paddings)
         self.sow(
             "tensorboard",
             "features",
@@ -253,7 +255,7 @@ class CtcAsrModel(nn.Module):
         )
         if self.feature_normalizer is not None:
             features = self.feature_normalizer.apply(features)
-        features = self._specaug(features, feature_paddings, deterministic=is_eval)
+        features = self.specaug(features, feature_paddings, deterministic=is_eval)
         self.sow(
             "tensorboard",
             "masked_features",
@@ -266,10 +268,10 @@ class CtcAsrModel(nn.Module):
             ),
         )
 
-        encodes, encode_paddings = self._encoder(
+        encodes, encode_paddings = self.encoder(
             features, feature_paddings, is_eval=is_eval
         )
-        logits = self._classifier(encodes)
+        logits = self.classifier(encodes)
         return logits, encode_paddings
 
 
@@ -624,24 +626,57 @@ class EvalTask(bobbin.EvalTask):
 
 
 # This function makes Transformer schedule function.
-def make_schedule(
+def transformer_schedule(
     base_learn_rate: float = 5.0, warmup_steps: int = 10000, model_dims: int = 256
 ) -> optax.Schedule:
-    def schedule(count):
+    def schedule_fn(count):
         return base_learn_rate * (
             model_dims**-0.5
             * jnp.minimum((count + 1) * warmup_steps**-1.5, (count + 1) ** -0.5)
         )
 
-    return schedule
+    return schedule_fn
 
 
-# and this function makes optimizer using the transformer scheduling function
-# above.  The scheduling function is also returned for using it to publish
+# Here, we have an additional structure for holding learning rate function
+# separately in addition to `GradientTransformation`.  This is for publishing
 # learning rates to TensorBoard.
-def make_tx() -> tuple[optax.GradientTransformation, optax.Schedule]:
-    schedule = make_schedule()
-    return optax.adamw(schedule, weight_decay=1e-6), schedule
+class Optimizer(struct.PyTreeNode):
+    """Pair of gradient transformation and learning rate scheuduler."""
+
+    tx: optax.GradientTransformation
+    learn_rate: optax.Schedule
+
+
+# Fiddle configurator for `Optimizer`.
+def make_optimizer_config() -> fdl.Config[Optimizer]:
+    learn_rate_cfg = fdl.Config(transformer_schedule)
+    tx_cfg = fdl.Config(optax.adamw, learn_rate_cfg, weight_decay=1e-6)
+    return fdl.Config(Optimizer, tx=tx_cfg, learn_rate=learn_rate_cfg)
+
+
+# This example doesn't use "autoconfig" feature of Fiddle. So, config building
+# is explicitly separated here as a function.
+def make_train_task_config(
+    num_outputs: int,
+    feature_normalizer: MeanVarNormalizer,
+    speech_shape: Sequence[int],
+    opt_config: fdl.Config[Optimizer],
+) -> fdl.Config[CtcAsrModel]:
+    model_cfg = fdl.Config(
+        CtcAsrModel,
+        feature_normalizer=feature_normalizer,
+        frontend=fdl.Config(asrnn.LogMelFilterBank),
+        encoder=fdl.Config(asrnn.CnnConformerEncoder,
+                           cnn=fdl.Config(asrnn.CnnEncoder),
+                           conformer_blocks=tuple(
+                              fdl.Config(asrnn.ConformerBlock)
+                              for unused_d in range(4)),
+                           ),
+        specaug=fdl.Config(asrnn.SpecAug),
+        classifier=fdl.Config(nn.Dense, features=num_outputs),
+    )
+    return fdl.Config(CtcAsrTask, model_cfg, opt_config.learn_rate, speech_shape)
 
 
 # The following two utility functions are for simplifying command-line
@@ -726,17 +761,42 @@ def main(args: argparse.Namespace):
                 f.read(), asrio.MeanVarNormalizer.empty()
             )
 
+    # This example is also for demonstrating Fiddle, and Fiddle first
+    # constructs config object before actual instances being built.
+    opt_cfg = make_optimizer_config()
+    train_task_cfg = make_train_task_config(
+        len(wpm_vocab), normalizer, speech_shape, opt_cfg
+    )
+
+    # Fiddle provides us freedom to modify some hyperparemeter here.
+    if args.model_size.upper() == "100M":
+        print(type(train_task_cfg.model.encoder.cnn))
+        train_task_cfg.model.encoder.cnn.num_outputs = 512
+        block_cfg = copy.deepcopy(train_task_cfg.model.encoder.conformer_blocks[0])
+        block_cfg.kernel_size = 32
+        train_task_cfg.model.encoder.conformer_blocks = (block_cfg,) * 17
+    elif args.model_type.upper() == "DEBUG":
+        pass
+    else:
+        raise ValueError("model_type should be one of: '100m' or 'debug")
+
+
+    # Actual optimizer and task are built with `fdl.build` as follows
+    opt = fdl.build(opt_cfg)
+    task = fdl.build(train_task_cfg)
+
+    model = task.model
+
     # Here, we configure model, optimizer, and tasks.
-    model = CtcAsrModel(num_outputs=len(wpm_vocab), feature_normalizer=normalizer)
-    tx, learn_rate_fn = make_tx()
-    task = CtcAsrTask(model, learn_rate_fn, speech_shape)
-    evaler = EvalTask(model, wpm_vocab)
+    evaler = EvalTask(task.model, wpm_vocab)
 
     # init must be deterministic for multi-host training
     train_state = task.initialize_train_state(
-        jax.random.PRNGKey(0), tx, checkpoint_path=all_checkpoint_path
+        jax.random.PRNGKey(0), opt.tx, checkpoint_path=all_checkpoint_path
     )
     train_state = flax.jax_utils.replicate(train_state, jax.local_devices())
+    # raise SystemExit
+
     # As explained in Jax's multi-process training document
     # (https://jax.readthedocs.io/en/latest/multi_process.html), multi-process
     # training doesn't need any modification on the model if the function is
@@ -754,7 +814,7 @@ def main(args: argparse.Namespace):
         else bobbin.NullSummaryWriter()
     )
     bobbin.publish_trainer_env_info(train_writer, train_state)
-
+    train_writer.text("fiddle_hparams", printing.as_str_flattened(train_task_cfg), step=0)
     # Seeting up crontab (auxiliary actions periodically executed during the training)
     eval_freq = num_train_samples // global_batch_size
     warmup = 10
@@ -814,6 +874,7 @@ if __name__ == "__main__":
     argparser.add_argument("--split_training_batch", type=int, default=None)
     argparser.add_argument("--multi_process", type=bool, default=None)
     argparser.add_argument("--max_steps", type=int, default=None)
+    argparser.add_argument("--model_size", type=str, default="DEBUG")
 
     args = argparser.parse_args()
     main(args)
