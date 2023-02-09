@@ -74,8 +74,7 @@ class TrainState(flax.training.train_state.TrainState):
         return jnp.array(self.step).ndim >= 1
 
 
-@struct.dataclass
-class StepInfo:
+class StepInfo(struct.PyTreeNode):
     """Output of each step containing loss and aux output of the loss function.
 
     Attributes:

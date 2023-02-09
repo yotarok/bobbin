@@ -275,8 +275,7 @@ class CtcAsrModel(nn.Module):
 
 # As similar to MNIST example, the auxiliary output for loss function is defined
 # as follows.
-@struct.dataclass
-class LossAuxOut:
+class LossAuxOut(struct.PyTreeNode):
     logits: Array
     logit_paddings: Array
     per_sample_loss: Array
@@ -394,7 +393,6 @@ def _write_error_to_tensorboard(
 # started, and `end_time` is a timestamp for the moment when result is
 # finalized. `sampled_results` field is for keeping some sampled results for
 # monitoring the decoding results on TensorBoard.
-@struct.dataclass
 class EvalResults(bobbin.EvalResults):
     token_error: asrio.SequenceError = struct.field(default_factory=asrio.SequenceError)
     word_error: asrio.SequenceError = struct.field(default_factory=asrio.SequenceError)

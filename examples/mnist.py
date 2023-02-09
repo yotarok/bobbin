@@ -164,8 +164,12 @@ def get_datasets(
 # (metrics) as a frozen data-class (flax struct).  Evaluation task will compute
 # an instance of a subclass of `bobbin.EvalResults` (here, `EvalResults`), and
 # computed `EvalResults`s are reduced over batches by using `EvalResults.reduce`.
-@struct.dataclass
 class EvalResults(bobbin.EvalResults):
+    # `bobbin.EvalResults` is a sub-class of `flax.struct.PyTreeNode`.
+    # Therefore, thie `EvalResults` is also a frozen dataclass, that means that
+    # the type-annotated fields below are immutable and will be used for
+    # automatically constructing some special functions like `__init__`.
+
     # Here, we count the numbers of correct and processed samples, and the sum
     # of log-probabilities of the correct labels.
     correct_count: chex.Scalar
@@ -265,8 +269,7 @@ class EvalTask(bobbin.EvalTask):
 # auxiliary data for later use (e.g. logging).  Here, for demonstrating this
 # feature, `LossAuxOut` is defined.  Any pytree (including None) can be used as
 # an auxiliary output.
-@struct.dataclass
-class LossAuxOut:
+class LossAuxOut(struct.PyTreeNode):
     logits: chex.Array
     per_sample_loss: chex.Array
     predicted_labels: chex.Array

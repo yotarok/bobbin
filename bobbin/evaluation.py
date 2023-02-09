@@ -57,8 +57,7 @@ Action = Callable
 BaseTrainState = flax.training.train_state.TrainState
 
 
-@struct.dataclass
-class EvalResults:
+class EvalResults(struct.PyTreeNode):
     """Evaluation results."""
 
     def to_log_message(self):
@@ -174,8 +173,7 @@ def _try_deserialize_eval_results(
     return None
 
 
-@struct.dataclass
-class RunEvalKeepBestResult:
+class RunEvalKeepBestResult(struct.PyTreeNode):
     """Data class for return values of `RunEvalKeepBest` action."""
 
     eval_results: dict[str, EvalResults]
@@ -311,7 +309,7 @@ def eval_batches(
 
 
 def eval_datasets(
-    eval_task: EvalTask, batch_gens: Dict[str, BatchGen], *args, **kwargs
+    eval_task: EvalTask, batch_gens: Mapping[str, BatchGen], *args, **kwargs
 ) -> Dict[str, EvalResults]:
     """Evaluates the batches provided from multiple datasets.
 
@@ -339,8 +337,7 @@ def eval_datasets(
     return results
 
 
-@struct.dataclass
-class SampledSet(collections.abc.Collection, Generic[T]):
+class SampledSet(collections.abc.Collection, Generic[T], struct.PyTreeNode):
     """Immutable set containing the fixed number samples from the elements added."""
 
     max_size: int

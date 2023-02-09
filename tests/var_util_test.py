@@ -34,8 +34,7 @@ from bobbin import var_util
 _FrozenDict = flax.core.FrozenDict
 
 
-@flax.struct.dataclass
-class _Pair:
+class _Pair(flax.struct.PyTreeNode):
     x: Any
     y: Any
     meta: Optional[Any] = flax.struct.field(pytree_node=False, default=None)
