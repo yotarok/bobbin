@@ -81,13 +81,29 @@ gcloud compute tpus tpu-vm ssh bobbin-tpu \
     'python3 bobbin/examples/librispeech/train.py \
         --tfds_data_dir gs://DATASET_BUCKET/tensorflow_datasets \
         --log_dir_path gs://JOB_LOG_BUCKET/librispeech/first_exp \
-        --per_device_batch_size=16'
+        --per_device_batch_size=16 --model_size=100m'
 # Don't forget a single quote at the end of line.
 ```
 
-For monitoring the training progress, you can also run TensorBoard process on
+The above example creates the following directories and writes the results:
+
+- Training checkpoints: `gs://JOB_LOG_BUCKET/librispeech/first_exp/all_ckpts`
+- Best checkpoint: `gs://JOB_LOG_BUCKET/librispeech/first_exp/best_ckpts`
+- TensorBoard summaries: `gs://JOB_LOG_BUCKET/librispeech/first_exp/tensorboard`
+
+For monitoring the training progress, you can also run TensorBoard server on
 the local machine as follows:
 
 ```
 tensorboard --logdir gs://JOB_LOG_BUCKET/librispeech/first_exp/tensorboard
+```
+
+## (Optional) Delete the TPU VM
+
+Once you finished the experiment, you can delete the TPU VM you created.
+This can be done by the follosing command:
+
+```
+gcloud compute tpus tpu-vm delete bobbin-tpu --zone ZONE --project
+PROJECT
 ```
