@@ -244,7 +244,12 @@ def _check_replica_integrity(x: chex.Array, path: str, rtol: float, atol: float)
 
 
 def assert_replica_integrity(
-    tree: ArrayTree, *, is_device_replicated: bool = True, atol=1e-5, rtol=1e-5
+    tree: ArrayTree,
+    *,
+    is_device_replicated: bool = True,
+    atol=1e-5,
+    rtol=1e-5,
+    backend: str = "cpu",
 ) -> None:
     """Checks if replicas have exactly same values over devices and processes.
 
@@ -253,10 +258,16 @@ def assert_replica_integrity(
       is_device_replicated: If True (by default), it assumes that `tree` is
         already replicated over devices and has the leading axis corresponding
         to the local device.
+      atol, rtol: absolute/ relative tolerance passed to
+        `np.testing.assert_allclose`.
+      backend: backend used for collective operations. strongly recommended to
+        use the default value ("cpu") as it will require huge amount of memory.
     """
     if not is_device_replicated:
         tree = flax.jax_utils.replicate(tree)
-    gathered = jax.pmap(lambda tree: jax.lax.all_gather(tree, "b"), "b")(tree)
+    gathered = jax.pmap(
+        lambda tree: jax.lax.all_gather(tree, "b"), "b", backend=backend
+    )(tree)
     gathered = flax.jax_utils.unreplicate(gathered)
     paths = nested_vars_to_paths(gathered)
 
