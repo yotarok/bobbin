@@ -388,7 +388,7 @@ class TrainTask(BaseTrainTask):
     def __init__(
         self,
         model: nn.Module,
-        example_args: Tuple[Any],
+        example_args: Iterable[Any],
         example_kwargs: Optional[Mapping[str, Any]] = None,
         required_rngs: Iterable[str] = (),
     ):
@@ -403,7 +403,7 @@ class TrainTask(BaseTrainTask):
         super().__init__()
         self._model = model
         self._required_rngs = tuple(required_rngs)
-        self._example_args = example_args
+        self._example_args = tuple(example_args)
         self._example_kwargs = dict() if example_kwargs is None else example_kwargs
 
     @property

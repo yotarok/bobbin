@@ -89,7 +89,7 @@ def pad_smaller_batch(
     # pad partial batch at the last
     ds = ds.padded_batch(
         1,
-        padded_shapes={k: [batch_size] + v for k, v in padded_shapes.items()},
+        padded_shapes={k: [batch_size] + list(v) for k, v in padded_shapes.items()},
         padding_values=padding_values,
     )
     return ds.map(
@@ -661,7 +661,7 @@ def make_train_task_config(
     feature_normalizer: asrio.MeanVarNormalizer,
     speech_shape: Sequence[int],
     opt_config: fdl.Config[Optimizer],
-) -> fdl.Config[CtcAsrModel]:
+) -> fdl.Config[CtcAsrTask]:
     default_depth = 4
     model_cfg = fdl.Config(
         CtcAsrModel,
