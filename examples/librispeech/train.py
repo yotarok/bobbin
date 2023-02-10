@@ -804,7 +804,6 @@ def main(args: argparse.Namespace):
         jax.random.PRNGKey(0), opt.tx, checkpoint_path=all_checkpoint_path
     )
     train_state = flax.jax_utils.replicate(train_state, jax.local_devices())
-    # raise SystemExit
 
     # As explained in Jax's multi-process training document
     # (https://jax.readthedocs.io/en/latest/multi_process.html), multi-process
