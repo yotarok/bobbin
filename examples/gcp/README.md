@@ -81,7 +81,7 @@ gcloud compute tpus tpu-vm ssh bobbin-tpu \
     'python3 bobbin/examples/librispeech/train.py \
         --tfds_data_dir gs://DATASET_BUCKET/tensorflow_datasets \
         --log_dir_path gs://JOB_LOG_BUCKET/librispeech/first_exp \
-        --per_device_batch_size=16 --model_size=100m'
+        --per_device_batch_size=16'
 # Don't forget a single quote at the end of line.
 ```
 
