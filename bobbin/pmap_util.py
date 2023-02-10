@@ -151,7 +151,11 @@ def tpmap(
         wrap_return = _id_fn
     if kwargtypes is None:
         kwargtypes = dict()
-    local_devices = jax.local_devices(backend=backend) if devices is None else devices
+
+    # Note that we shouldn't perform any jax operation here because some
+    # environment requires jax initialization process done before any other
+    # jax operations are called, and this function is typically used as a
+    # function decolator that is called right after the module is imported.
 
     argtypes = [resolve_argtype_str(ty) for ty in argtypes]
     kwargtypes = {k: resolve_argtype_str(ty) for k, ty in kwargtypes.items()}
@@ -170,6 +174,9 @@ def tpmap(
     )
 
     def wrapped_f(*args, **kwargs):
+        local_devices = (
+            jax.local_devices(backend=backend) if devices is None else devices
+        )
         if len(args) != len(argtypes):
             raise ValueError(
                 "The number of positional args passed to the target function "
