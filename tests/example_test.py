@@ -139,16 +139,17 @@ class LibriSpeechExampleTest(absltest.TestCase):
         with tempfile.TemporaryDirectory() as logdir:
             args = argparse.Namespace()
             args.log_dir_path = epath.Path(logdir)
-            args.max_steps = 0
+            args.max_steps = 1
 
             # The rests are default.
             args.tfds_data_dir = None
             args.feature_normalizer = None
             args.per_device_batch_size = 8
             args.wpm_vocab = None
-            args.wpm_size_limit = 1024
+            args.wpm_size_limit = 32
             args.split_training_batch = None
             args.multi_process = None
+            args.model_size = "UNITTEST"
 
             librispeech.train.main(args)
 

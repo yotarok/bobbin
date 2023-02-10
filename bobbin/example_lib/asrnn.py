@@ -560,7 +560,9 @@ class CnnConformerEncoder(nn.Module):
     """
 
     cnn: nn.Module = CnnEncoder()
-    conformer_blocks: Sequence[nn.Module] = (ConformerBlock(),) * 4
+    conformer_blocks: Sequence[nn.Module] = tuple(
+        ConformerBlock() for unused_d in range(4)
+    )
     conformer_input_dropout_prob: float = 0.1
     num_outputs: int = 256
     is_eval: Optional[bool] = None
