@@ -428,6 +428,7 @@ class ConformerBlock(nn.Module):
         )(x, x_paddings, deterministic=is_eval)
 
         x = ConformerConvBlock(
+            kernel_size=self.kernel_size,
             residual_dropout_prob=self.conv_residual_dropout_prob,
         )(x, x_paddings, deterministic=is_eval)
 
