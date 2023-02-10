@@ -113,4 +113,5 @@
           - "tensorboard"
           - "tensorflow-io"
           - "tensorflow_datasets"
+          - "fiddle"
       become: true

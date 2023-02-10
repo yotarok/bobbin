@@ -290,7 +290,7 @@ class CnnConformerEncoderTest(chex.TestCase):
                 ),
                 dict(is_eval=is_eval),
                 init_kwargs=dict(
-                    cnn_def=lambda: asrnn.CnnEncoder(num_outputs=model_dims),
+                    cnn=asrnn.CnnEncoder(num_outputs=model_dims),
                     num_outputs=model_dims,
                 ),
             )

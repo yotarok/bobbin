@@ -39,7 +39,6 @@ import urllib.request
 import chex
 import fiddle as fdl
 from fiddle import printing
-from fiddle.experimental import auto_config
 import flax
 from flax import struct
 import flax.linen as nn
@@ -659,20 +658,23 @@ def make_optimizer_config() -> fdl.Config[Optimizer]:
 # is explicitly separated here as a function.
 def make_train_task_config(
     num_outputs: int,
-    feature_normalizer: MeanVarNormalizer,
+    feature_normalizer: asrio.MeanVarNormalizer,
     speech_shape: Sequence[int],
     opt_config: fdl.Config[Optimizer],
 ) -> fdl.Config[CtcAsrModel]:
+    default_depth = 4
     model_cfg = fdl.Config(
         CtcAsrModel,
         feature_normalizer=feature_normalizer,
         frontend=fdl.Config(asrnn.LogMelFilterBank),
-        encoder=fdl.Config(asrnn.CnnConformerEncoder,
-                           cnn=fdl.Config(asrnn.CnnEncoder),
-                           conformer_blocks=tuple(
-                              fdl.Config(asrnn.ConformerBlock)
-                              for unused_d in range(4)),
-                           ),
+        encoder=fdl.Config(
+            asrnn.CnnConformerEncoder,
+            cnn=fdl.Config(asrnn.CnnEncoder),
+            conformer_blocks=tuple(
+                fdl.Config(asrnn.ConformerBlock)
+                for unused_depth in range(default_depth)
+            ),
+        ),
         specaug=fdl.Config(asrnn.SpecAug),
         classifier=fdl.Config(nn.Dense, features=num_outputs),
     )
@@ -770,22 +772,28 @@ def main(args: argparse.Namespace):
 
     # Fiddle provides us freedom to modify some hyperparemeter here.
     if args.model_size.upper() == "100M":
-        print(type(train_task_cfg.model.encoder.cnn))
         train_task_cfg.model.encoder.cnn.num_outputs = 512
         block_cfg = copy.deepcopy(train_task_cfg.model.encoder.conformer_blocks[0])
         block_cfg.kernel_size = 32
-        train_task_cfg.model.encoder.conformer_blocks = (block_cfg,) * 17
-    elif args.model_type.upper() == "DEBUG":
+        train_task_cfg.model.encoder.conformer_blocks = tuple(
+            copy.deepcopy(block_cfg) for unused_d in range(17)
+        )
+    elif args.model_size.upper() == "DEBUG":
         pass
+    elif args.model_size.upper() == "UNITTEST":
+        train_task_cfg.model.encoder.cnn.channels = (5, 5)
+        train_task_cfg.model.encoder.cnn.num_outputs = 16
+        block_cfg = copy.deepcopy(train_task_cfg.model.encoder.conformer_blocks[0])
+        block_cfg.kernel_size = 3
+        train_task_cfg.model.encoder.conformer_blocks = tuple(
+            copy.deepcopy(block_cfg) for unused_d in range(2)
+        )
     else:
-        raise ValueError("model_type should be one of: '100m' or 'debug")
-
+        raise ValueError("model_size should be one of: '100m' or 'debug")
 
     # Actual optimizer and task are built with `fdl.build` as follows
     opt = fdl.build(opt_cfg)
     task = fdl.build(train_task_cfg)
-
-    model = task.model
 
     # Here, we configure model, optimizer, and tasks.
     evaler = EvalTask(task.model, wpm_vocab)
@@ -814,7 +822,9 @@ def main(args: argparse.Namespace):
         else bobbin.NullSummaryWriter()
     )
     bobbin.publish_trainer_env_info(train_writer, train_state)
-    train_writer.text("fiddle_hparams", printing.as_str_flattened(train_task_cfg), step=0)
+    train_writer.text(
+        "fiddle_hparams", printing.as_str_flattened(train_task_cfg), step=0
+    )
     # Seeting up crontab (auxiliary actions periodically executed during the training)
     eval_freq = num_train_samples // global_batch_size
     warmup = 10
