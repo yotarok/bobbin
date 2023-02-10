@@ -778,6 +778,7 @@ def main(args: argparse.Namespace):
         train_task_cfg.model.encoder.conformer_blocks = tuple(
             copy.deepcopy(block_cfg) for unused_d in range(17)
         )
+        opt_cfg.learn_rate.model_dims = 512
     elif args.model_size.upper() == "DEBUG":
         pass
     elif args.model_size.upper() == "UNITTEST":
