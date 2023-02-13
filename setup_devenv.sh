@@ -15,7 +15,7 @@
 
 
 # rm -fr devenv
-# python3 -m venv devenv
+python3 -m venv devenv
 source devenv/bin/activate
 
 pip3 install --upgrade pip
