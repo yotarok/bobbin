@@ -227,6 +227,8 @@ class CnnEncoder(nn.Module):
                 x = PaddedBatchNorm(
                     use_running_average=is_eval, axis_name=batch_norm_axis_name
                 )(x, pad)
+
+            x = x * (1.0 - pad)[..., np.newaxis, np.newaxis]
         x = x.reshape(pad.shape + (-1,))
         x = nn.Dense(features=self.num_outputs)(x)
         return x, pad
@@ -268,10 +270,13 @@ class ConformerConvBlock(nn.Module):
         x = nn.LayerNorm()(x)
         x = nn.Dense(features=model_dims * 2)(x)
         x = nn.activation.glu(x)
+
+        x = x * (1.0 - x_paddings[..., np.newaxis])
         x = nn.Conv(
             features=model_dims,
             kernel_size=(self.kernel_size,),
             use_bias=self.use_conv_bias,
+            padding="SAME",
             feature_group_count=model_dims,
         )(x)
 
