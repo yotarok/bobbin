@@ -10,16 +10,19 @@ For completing the process described in this doc, you will need:
   1. For datasets (denoted as "DATASET\_BUCKET" in the followings),
   1. and for training results (denoted as "JOB\_LOG\_BUCKET).
 - bobbin code repo cloned in the local machine.
+- installation of Google Cloud SDK.
+- installation of some tools on the local machines: ansible, jq.
 
 ## Setup client environment
 
 The configuration is provided as an [Ansible](https://www.ansible.com/)
 playbook. Therefore, you need to install Ansible for proceeding the process
-described below. For Ubuntu Linux, Ansible can be installed by the following
-command:
+described below. Further within Ansible, the example uses "jq" for parsing
+JSON obtained as outputs of "gcloud" command. For Ubuntu Linux, those tools can
+be installed by the following command:
 
 ```
-sudo apt install ansible
+sudo apt install ansible jq
 ```
 
 The additional required python packages can be installed to venv by running

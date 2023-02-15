@@ -13,20 +13,25 @@
     accelerator_type: v3-8
     vm_version: tpu-vm-base
   tasks:
+    - name: Enabling TPU API
+      ansible.builtin.shell:
+        cmd: gcloud --quiet services enable tpu.googleapis.com --project {{ vars.project }}
+      register: enable_api_result
+      changed_when: "'successfully' in enable_api_result.stderr"
     - name: Creating TPU node
       ansible.builtin.shell:
         cmd: |
-          NUM_VMS=$(gcloud compute tpus tpu-vm list --zone {{ vars.zone }} \
+          NUM_VMS=$(gcloud --quiet compute tpus tpu-vm list --zone {{ vars.zone }} \
              --project {{ vars.project }} --format json | jq '. | length')
           if [[ 0 -eq "${NUM_VMS}" ]]; then
-            gcloud compute tpus tpu-vm create {{ vars.node_name }} --zone {{ vars.zone }} \
+            gcloud --quiet compute tpus tpu-vm create {{ vars.node_name }} --zone {{ vars.zone }} \
               --project {{ vars.project }} --accelerator-type {{ vars.accelerator_type }} \
               --version {{ vars.vm_version }} || exit 1
             echo "CREATED"
           else
             echo "ALREADY_CREATED"
           fi
-          SSH_CMD=$(gcloud compute tpus tpu-vm ssh {{ vars.node_name }} --zone {{ vars.zone }} --project {{ vars.project }} --dry-run)
+          SSH_CMD=$(gcloud --quiet compute tpus tpu-vm ssh {{ vars.node_name }} --zone {{ vars.zone }} --project {{ vars.project }} --dry-run)
           SSH_OPTS=$(echo "${SSH_CMD}" | sed 's/^[^ ]* //' | sed 's/ [^ ]*$//' | sed 's/-t //')
           TARGET=$(echo "${SSH_CMD}" | sed 's/^.* \([^ ]*\)$/\1/')
           USER=$(echo "${TARGET}" | cut -d'@' -f 1)
