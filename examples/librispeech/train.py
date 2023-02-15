@@ -650,7 +650,7 @@ class Optimizer(struct.PyTreeNode):
 # Fiddle configurator for `Optimizer`.
 def make_optimizer_config() -> fdl.Config[Optimizer]:
     learn_rate_cfg = fdl.Config(transformer_schedule)
-    tx_cfg = fdl.Config(optax.adamw, learn_rate_cfg, weight_decay=1e-6)
+    tx_cfg = fdl.Config(asrnn.adamw_with_clipping, learn_rate_cfg, weight_decay=1e-6)
     return fdl.Config(Optimizer, tx=tx_cfg, learn_rate=learn_rate_cfg)
 
 

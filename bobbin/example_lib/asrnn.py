@@ -24,6 +24,7 @@ import flax.linen as nn
 import jax
 import jax.numpy as jnp
 import numpy as np
+import optax
 
 from bobbin.example_lib import asrio
 
@@ -800,3 +801,62 @@ class PaddedBatchNorm(nn.Module):
         )
         results = results * mask
         return results
+
+
+def adamw_with_clipping(
+    learning_rate: Union[float, optax.Schedule],
+    b1: float = 0.9,
+    b2: float = 0.999,
+    eps: float = 1e-8,
+    eps_root: float = 0.0,
+    mu_dtype: Optional[Any] = None,
+    weight_decay: float = 1e-4,
+    mask: Optional[Union[Any, Callable[[chex.ArrayTree], Any]]] = None,
+    l2_penalty: float = 0.0,
+    block_update_rms_threshold: Optional[float] = 1.0,
+    global_gradient_norm_threshold: Optional[float] = 5.0,
+) -> optax.GradientTransformation:
+    """
+    `optax.adamw` with gradient clipping inserted before learning rate scaling.
+
+    Args;
+      b1, b2, eps, eps_root, mudtype, weight_decay, mask: parameters for AdamW
+        optimizer. see `optax.adamw` for details.
+      l2_penalty: L2 regularization coefficients.  non-zero value for this
+        argument will subtract parameter values from the raw gradient vector.
+        This opeartion corresponds to adding L2 regularization term into the
+        original loss function, unlike adding weight-decay term to the update
+        vector as in AdamW.
+      block_update_rms_threshold: threshold for root-mean-squares of each leaf
+        of the Adam-scaled update vector. for leaves that has exceeded rms, the
+        optimizer scales down the gradient.
+      global_gradient_norm_threshold: threshold for L2 norm of the raw gradient
+        vector. when a gradient vector is larger than the specified norm, it
+        scales down all variables.
+
+    Returns:
+      constructed `GradientTransformation`.
+    """
+
+    if not callable(learning_rate):
+        const_rate = learning_rate
+
+        def rate_fn(count):
+            return const_rate
+
+        learning_rate = rate_fn
+
+    components = []
+    if l2_penalty:
+        components.append(optax.add_decayed_weights(l2_penalty, mask))
+    if global_gradient_norm_threshold is not None:
+        components.append(optax.clip_by_global_norm(global_gradient_norm_threshold))
+    components.append(
+        optax.scale_by_adam(b1=b1, b2=b2, eps=eps, eps_root=eps_root, mu_dtype=mu_dtype)
+    )
+    if block_update_rms_threshold is not None:
+        components.append(optax.clip_by_block_rms(block_update_rms_threshold))
+    components.append(optax.add_decayed_weights(weight_decay, mask))
+    components.append(optax.scale_by_schedule(lambda count: -1 * learning_rate(count)))
+
+    return optax.chain(*components)
