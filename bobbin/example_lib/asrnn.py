@@ -31,6 +31,9 @@ from bobbin.example_lib import asrio
 Array = chex.Array
 InitializerFn = Callable[[chex.PRNGKey, chex.Shape, chex.ArrayDType], Array]
 
+# Following the default initializer in `flax.linen.linear`.
+default_kernel_init = nn.initializers.lecun_normal()
+
 
 def _input_padding_validation(funcname: str, x: Array, x_paddings: Array) -> Tuple[int]:
     """Checks whether the leading axes of features and padding indicators match.
@@ -180,6 +183,12 @@ class CnnEncoder(nn.Module):
     batch_norm_axis_name: Optional[str] = "batch"
     is_eval: Optional[bool] = None
 
+    kernel_init: InitializerFn = default_kernel_init
+    bias_init: InitializerFn = nn.initializers.zeros_init()
+
+    output_kernel_init: InitializerFn = default_kernel_init
+    output_bias_init: InitializerFn = nn.initializers.zeros_init()
+
     @nn.compact
     def __call__(
         self,
@@ -188,7 +197,7 @@ class CnnEncoder(nn.Module):
         *,
         is_eval: Optional[bool] = None,
         batch_norm_axis_name: Optional[str] = None,
-    ) -> tuple[Array, Array]:
+    ) -> Tuple[Array, Array]:
         _input_padding_validation("CnnEncoder", features, feature_paddings)
         is_eval = nn.merge_param("is_eval", self.is_eval, is_eval)
         if self.use_batch_norm:
@@ -213,6 +222,8 @@ class CnnEncoder(nn.Module):
                 strides=strides,
                 use_bias=self.use_bias,
                 padding="SAME",
+                kernel_init=self.kernel_init,
+                bias_init=self.bias_init,
             )(x)
             pad = jax.lax.reduce_window(
                 pad,
@@ -230,7 +241,11 @@ class CnnEncoder(nn.Module):
 
             x = x * (1.0 - pad)[..., np.newaxis, np.newaxis]
         x = x.reshape(pad.shape + (-1,))
-        x = nn.Dense(features=self.num_outputs)(x)
+        x = nn.Dense(
+            features=self.num_outputs,
+            kernel_init=self.output_kernel_init,
+            bias_init=self.output_bias_init,
+        )(x)
         return x, pad
 
 
@@ -249,6 +264,11 @@ class ConformerConvBlock(nn.Module):
     use_conv_bias: bool = False
     deterministic: Optional[bool] = None
     batch_norm_axis_name: Optional[str] = "batch"
+    pre_conv_kernel_init: InitializerFn = default_kernel_init
+    pre_conv_bias_init: InitializerFn = nn.initializers.zeros_init()
+    conv_kernel_init: InitializerFn = default_kernel_init
+    post_conv_kernel_init: InitializerFn = default_kernel_init
+    post_conv_bias_init: InitializerFn = nn.initializers.zeros_init()
 
     @nn.compact
     def __call__(
@@ -268,7 +288,11 @@ class ConformerConvBlock(nn.Module):
 
         *unused_batch_sizes, unused_time_steps, model_dims = x.shape
         x = nn.LayerNorm()(x)
-        x = nn.Dense(features=model_dims * 2)(x)
+        x = nn.Dense(
+            features=model_dims * 2,
+            kernel_init=self.pre_conv_kernel_init,
+            bias_init=self.pre_conv_bias_init,
+        )(x)
         x = nn.activation.glu(x)
 
         x = x * (1.0 - x_paddings[..., np.newaxis])
@@ -278,13 +302,18 @@ class ConformerConvBlock(nn.Module):
             use_bias=self.use_conv_bias,
             padding="SAME",
             feature_group_count=model_dims,
+            kernel_init=self.conv_kernel_init,
         )(x)
 
         x = PaddedBatchNorm(
             use_running_average=deterministic, axis_name=batch_norm_axis_name
         )(x, x_paddings)
         x = nn.activation.swish(x)
-        x = nn.Dense(features=model_dims)(x)
+        x = nn.Dense(
+            features=model_dims,
+            kernel_init=self.post_conv_kernel_init,
+            bias_init=self.post_conv_bias_init,
+        )(x)
         if self.residual_dropout_prob > 0:
             x = nn.Dropout(self.residual_dropout_prob)(x, deterministic=deterministic)
         x = x + inputs
@@ -309,6 +338,8 @@ class ConformerFfnBlock(nn.Module):
     residual_dropout_prob: float = 0.0
     residual_weight: float = 0.5
     deterministic: Optional[bool] = None
+    kernel_init: InitializerFn = default_kernel_init
+    bias_init: InitializerFn = nn.initializers.zeros_init()
 
     @nn.compact
     def __call__(self, x: Array, deterministic: Optional[bool] = None) -> Array:
@@ -319,11 +350,17 @@ class ConformerFfnBlock(nn.Module):
 
         *unused_batch_sizes, unused_time_steps, model_dims = x.shape
         x = nn.LayerNorm()(x)
-        x = nn.Dense(features=self.hidden_dims)(x)
+        x = nn.Dense(
+            features=self.hidden_dims,
+            kernel_init=self.kernel_init,
+            bias_init=self.bias_init,
+        )(x)
         x = nn.activation.swish(x)
         if self.hidden_dropout_prob > 0:
             x = nn.Dropout(self.hidden_dropout_prob)(x, deterministic=deterministic)
-        x = nn.Dense(features=model_dims)(x)
+        x = nn.Dense(
+            features=model_dims, kernel_init=self.kernel_init, bias_init=self.bias_init
+        )(x)
         if self.residual_dropout_prob > 0:
             x = nn.Dropout(self.residual_dropout_prob)(x, deterministic=deterministic)
         x = self.residual_weight * x + inputs
@@ -347,6 +384,9 @@ class ConformerMhsaBlock(nn.Module):
     attention_dropout_prob: float = 0
     deterministic: Optional[bool] = None
 
+    kernel_init: InitializerFn = default_kernel_init
+    bias_init: InitializerFn = nn.initializers.zeros_init()
+
     @nn.compact
     def __call__(
         self, x: Array, x_paddings: Array, deterministic: Optional[bool] = None
@@ -364,6 +404,8 @@ class ConformerMhsaBlock(nn.Module):
         x = nn.SelfAttention(
             self.num_heads,
             dropout_rate=self.attention_dropout_prob,
+            kernel_init=self.kernel_init,
+            bias_init=self.bias_init,
         )(
             x,
             mask=padding_mask,
@@ -580,6 +622,9 @@ class CnnConformerEncoder(nn.Module):
     is_eval: Optional[bool] = None
     use_fixed_pos_emb: bool = True
 
+    output_kernel_init: InitializerFn = default_kernel_init
+    output_bias_init: InitializerFn = nn.initializers.zeros_init()
+
     @nn.compact
     def __call__(
         self, features: Array, feature_paddings: Array, is_eval: Optional[bool]
@@ -602,7 +647,11 @@ class CnnConformerEncoder(nn.Module):
         for block in self.conformer_blocks:
             x, pad = block(x, pad, is_eval=is_eval)
 
-        x = nn.Dense(features=self.num_outputs)(x)
+        x = nn.Dense(
+            features=self.num_outputs,
+            kernel_init=self.output_kernel_init,
+            bias_init=self.output_bias_init,
+        )(x)
         return x, feature_paddings
 
 
