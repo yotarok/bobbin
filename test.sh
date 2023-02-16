@@ -19,7 +19,7 @@ python3 -m venv "${VENV_DIR}"
 source "${VENV_DIR}/bin/activate"
 
 pip install --upgrade pip setuptools wheel
-pip install flake8 pytest-xdist pytype black
+pip install --upgrade flake8 pytest-xdist pytype black nbqa
 pip install -r requirements/requirements.txt
 pip install -r requirements/requirements-test.txt
 
@@ -34,4 +34,11 @@ pytype --config=pytype.toml
 
 ## tests
 PYTHONPATH=. pytest -n auto tests
+
+pip install -r requirements/requirements-docs.txt
+make -C docs html
+
+nbqa black --check docs/*.ipynb
+nbqa flake8 --ignore=E203,W503 --max-line-length=88 docs/*.ipynb
+nbqa pytype docs/*.ipynb
 

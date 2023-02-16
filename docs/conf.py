@@ -96,6 +96,7 @@ extensions = [
     "sphinx_autodoc_typehints",
     "sphinx_rtd_theme",
     # 'coverage_check',
+    "myst_nb",
 ]
 
 # Add any paths that contain templates here, relative to this directory.

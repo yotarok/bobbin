@@ -18,7 +18,6 @@ Features
 - TensorBoard: Some mechanism to publish training intermediates, and other
   tools wrapping `flax.metrics.tensorboard` API.
 - Other utility functions
-  - array_util: Some typical array manipulation
   - var_util: Some typical pytree manipulation
   - pmap_util: Some easy accessor for pmap
   - pytypes: Some type definitions for self-documenting code.
@@ -35,6 +34,20 @@ Basic usage
 
 .. toctree::
    :hidden:
-   :maxdepth: 2
+   :caption: Basic Usage
+   :maxdepth: 1
+
+   pmap_util
+
+   var_util
+
+
+API documentation
+^^^^^^^^^^^^^^^^^
+
+.. toctree::
+   :hidden:
+   :maxdepth: 1
+   :caption: API
 
    api

@@ -51,6 +51,8 @@ from .training import TrainTask
 from .training import TrainState
 
 from .var_util import dump_pytree_json
+from .var_util import flatten_with_paths
+from .var_util import nested_vars_to_paths
 from .var_util import parse_pytree_json
 from .var_util import read_pytree_json_file
 from .var_util import summarize_shape

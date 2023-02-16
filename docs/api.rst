@@ -110,12 +110,20 @@ Var utils
 
 .. autosummary::
 
+    flatten_with_paths
+    nested_vars_to_paths
     dump_pytree_json
     parse_pytree_json
     read_pytree_json_file
     write_pytree_json_file
     summarize_shape
     total_dimensionality
+
+Path
+~~~~
+
+.. autofunction:: flatten_with_paths
+.. autofunction:: nested_vars_to_paths
 
 JSON I/O
 ~~~~~~~~
