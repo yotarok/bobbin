@@ -108,7 +108,7 @@ class StepFunctionTest(chex.TestCase):
         )
 
         task = SgdMeanEstimation()
-        training_step_fn = task.make_training_step_fn(pmap_axis_name=None)
+        training_step_fn = task.make_training_step_fn()
 
         batch = np.random.normal(size=(batch_size, dims))
         next_train_state, step_info = self.variant(training_step_fn)(

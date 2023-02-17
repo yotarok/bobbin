@@ -94,17 +94,65 @@ ValueAndGradFn = Callable[[Parameter, Batch], ValueAndGradResult]
 class TrainingStepFnBuilder(TrainingStepFn):
     """Lazy builder for training step function."""
 
-    raw_fn: TrainingStepFn
+    compute_loss_fn: Callable
+    reduce_extra_vars_fn: Callable
     do_jit: bool = False
     static_argnums: Tuple[int, ...] = ()
     backend: Optional[str] = None
     devices: Optional[List[chex.Device]] = None
     donate_argnums: Tuple[int, ...] = ()
-    do_pmap: bool = False
     pmap_axis_name: Optional[Any] = None
 
+    def make_base_step_fn(self):
+        def train_step_fn(
+            train_state: TrainState,
+            batch: Batch,
+            prng_key: PRNGKey,
+        ) -> Tuple[TrainState, StepInfo]:
+            if self.pmap_axis_name is not None:
+                try:
+                    jax.lax.axis_index(self.pmap_axis_name)
+                except NameError:
+                    raise ValueError(
+                        "training step function is configured to use "
+                        f"pmap_axis_name={self.pmap_axis_name}, but is called "
+                        "outside of a pmap context. If you do not intend to "
+                        "perform multi-device parallelization, do not call "
+                        "`TrainingStepFnBuilder.pmap`"
+                    )
+
+            value_and_grad = jax.value_and_grad(self.compute_loss_fn, has_aux=True)
+            (loss, (mutated_vars, loss_aux)), grads = value_and_grad(
+                train_state.params,
+                batch,
+                extra_vars=train_state.extra_vars,
+                prng_key=prng_key,
+                step=train_state.step,
+            )
+
+            if self.pmap_axis_name is not None:
+                grads = jax.lax.pmean(grads, axis_name=self.pmap_axis_name)
+            train_state = train_state.apply_gradients(grads=grads)
+            updated_extra_vars = train_state.extra_vars.copy()
+            for colname, tree in mutated_vars.items():
+                if colname == "params":
+                    continue
+
+                if self.pmap_axis_name is not None:
+                    updated_extra_vars[colname] = self.reduce_extra_vars_fn(
+                        colname, tree, axis_name=self.pmap_axis_name
+                    )
+
+            train_state = train_state.replace(extra_vars=updated_extra_vars)
+
+            return train_state, StepInfo(loss=loss, loss_aux_out=loss_aux)
+
+        return train_step_fn
+
     def pmap(self, axis_name: Any) -> TrainingStepFnBuilder:
-        return dataclasses.replace(self, do_pmap=True, pmap_axis_name=axis_name)
+        if axis_name is None:
+            raise ValueError("axis_name for `pmap` cannot be None.")
+        return dataclasses.replace(self, pmap_axis_name=axis_name)
 
     def jit(self) -> TrainingStepFnBuilder:
         return dataclasses.replace(self, do_jit=True)
@@ -112,8 +160,9 @@ class TrainingStepFnBuilder(TrainingStepFn):
     @property
     @functools.lru_cache(maxsize=None)
     def compiled_fn(self):
-        f = self.raw_fn
-        if self.do_pmap:
+        f = self.make_base_step_fn()
+        if self.pmap_axis_name is not None:
+            # pmap implies jit, so we don't perform JIT explicitly when pmap
             f = tpmap(
                 f,
                 axis_name=self.pmap_axis_name,
@@ -196,55 +245,12 @@ class BaseTrainTask:
 
     def make_training_step_fn(
         self,
-        pmap_axis_name: Optional[str] = "batch",
     ) -> TrainingStepFnBuilder:
         """Creates training step function."""
-
-        def train_step_fn(
-            train_state: TrainState,
-            batch: Batch,
-            prng_key: PRNGKey,
-        ) -> Tuple[TrainState, StepInfo]:
-            if pmap_axis_name is not None:
-                try:
-                    jax.lax.axis_index(pmap_axis_name)
-                except NameError:
-                    raise ValueError(
-                        "`make_training_step_fn` is called with "
-                        f"pmap_axis_name={pmap_axis_name} but this function is"
-                        "used outside of pmap context. If you do not intend to"
-                        "perform multi-device parallelization, set "
-                        "pmap_axis_name=None."
-                    )
-
-            value_and_grad = jax.value_and_grad(self.compute_loss, has_aux=True)
-            (loss, (mutated_vars, loss_aux)), grads = value_and_grad(
-                train_state.params,
-                batch,
-                extra_vars=train_state.extra_vars,
-                prng_key=prng_key,
-                step=train_state.step,
-            )
-
-            if pmap_axis_name is not None:
-                grads = jax.lax.pmean(grads, axis_name=pmap_axis_name)
-            train_state = train_state.apply_gradients(grads=grads)
-            updated_extra_vars = train_state.extra_vars.copy()
-            for colname, tree in mutated_vars.items():
-                if colname == "params":
-                    continue
-
-                if pmap_axis_name is not None:
-                    updated_extra_vars[colname] = self.reduce_extra_vars(
-                        colname, tree, axis_name=pmap_axis_name
-                    )
-
-            train_state = train_state.replace(extra_vars=updated_extra_vars)
-
-            return train_state, StepInfo(loss=loss, loss_aux_out=loss_aux)
-
-        train_step_fn = jax.named_call(train_step_fn, name="train_step_fn")
-        return TrainingStepFnBuilder(train_step_fn)
+        return TrainingStepFnBuilder(
+            compute_loss_fn=self.compute_loss,
+            reduce_extra_vars_fn=self.reduce_extra_vars,
+        )
 
     def reduce_extra_vars(
         self, colname: str, tree: ArrayTree, *, axis_name: str
