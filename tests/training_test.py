@@ -152,34 +152,6 @@ class StepFunctionTest(chex.TestCase):
             np.mean(step_info.loss), np.mean((batch - 1.0) ** 2), atol=1e-5, rtol=1e-5
         )
 
-    def test_pmap_split_step(self):
-        nsteps = 7
-
-        dims = 5
-        batch_size = 3 * jax.local_device_count() * nsteps
-
-        tx = optax.sgd(0.001)
-        train_state = training.initialize_train_state(
-            l2_distortion_loss, {"params": np.ones((dims,))}, tx=tx
-        )
-        train_state = flax.jax_utils.replicate(train_state, jax.local_devices())
-
-        task = SgdMeanEstimation()
-        training_step_fn = task.make_training_step_fn(split_steps=nsteps).pmap("batch")
-
-        batch = np.random.normal(size=(batch_size, dims))
-        next_train_state, step_info = training_step_fn(
-            train_state,
-            batch,
-            jax.random.PRNGKey(0),
-        )
-
-        np.testing.assert_allclose(next_train_state.step, train_state.step + 1)
-
-        np.testing.assert_allclose(
-            np.mean(step_info.loss), np.mean((batch - 1.0) ** 2), atol=1e-5, rtol=1e-5
-        )
-
 
 class TrainTaskTest(chex.TestCase):
     def test_log_writer_creation(self):

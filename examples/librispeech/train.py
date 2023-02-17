@@ -766,6 +766,17 @@ def main(args: argparse.Namespace):
     # This example is also for demonstrating Fiddle, and Fiddle first
     # constructs config object before actual instances being built.
     opt_cfg = make_optimizer_config()
+
+    # and thanks to flexibility of Fiddle, it's very easy to attach
+    # multi-step update feature (a memory-saving technique that simulates
+    # larger-batch training by accumulating updates of smaller batches)
+    # after optax is configured.
+    if args.accumulate_updates != 1:
+        original_tx = opt_cfg.tx
+        opt_cfg.tx = fdl.Config(
+            optax.MultiSteps, original_tx, every_k_schedule=args.accumulate_updates
+        )
+
     train_task_cfg = make_train_task_config(
         len(wpm_vocab), normalizer, speech_shape, opt_cfg
     )
@@ -810,9 +821,7 @@ def main(args: argparse.Namespace):
     # training doesn't need any modification on the model if the function is
     # pmapped and `jax.lax.p*` functions are properly used.
     # So, here `pmap` is necessary.
-    train_step_fn = task.make_training_step_fn(
-        split_steps=args.split_training_batch
-    ).pmap("batch")
+    train_step_fn = task.make_training_step_fn().pmap("batch")
 
     prng_key = jax.random.PRNGKey(jax.process_index() + 3)
 
@@ -874,17 +883,79 @@ if __name__ == "__main__":
     # Disable TF's memory preallocation if TF is built with CUDA.
     tf.config.experimental.set_visible_devices([], "GPU")
 
+    # default feature_normalizer
+    default_feature_normalizer = str(
+        epath.Path(__file__).parent / "librispeech.meanstddev.logmelfb80.json"
+    )
+
     argparser = argparse.ArgumentParser(description="LibriSpeech training")
-    argparser.add_argument("--tfds_data_dir", type=str, default=None)
-    argparser.add_argument("--feature_normalizer", type=str, default=None)
-    argparser.add_argument("--per_device_batch_size", type=int, default=8)
-    argparser.add_argument("--wpm_vocab", type=str, default=None)
-    argparser.add_argument("--wpm_size_limit", type=int, default=1024)
-    argparser.add_argument("--log_dir_path", type=epath.Path, default="log")
-    argparser.add_argument("--split_training_batch", type=int, default=None)
-    argparser.add_argument("--multi_process", type=bool, default=None)
-    argparser.add_argument("--max_steps", type=int, default=None)
-    argparser.add_argument("--model_size", type=str, default="DEBUG")
+    argparser.add_argument(
+        "--tfds_data_dir", type=str, default=None, help="path to tensorflow_datasets."
+    )
+    argparser.add_argument(
+        "--feature_normalizer",
+        type=str,
+        default=default_feature_normalizer,
+        help="path to statistics for feature normalization.",
+    )
+    argparser.add_argument(
+        "--per_device_batch_size", type=int, default=8, help="per-device batch size"
+    )
+    argparser.add_argument(
+        "--wpm_vocab",
+        type=str,
+        default=None,
+        help=(
+            "path to WPM file. it will be downloded from lingvo github repo if "
+            "not specified."
+        ),
+    )
+    argparser.add_argument(
+        "--wpm_size_limit",
+        type=int,
+        default=1024,
+        help="if specified, only use the first N WPMs",
+    )
+    argparser.add_argument(
+        "--log_dir_path",
+        type=epath.Path,
+        default="log",
+        help="path to output training logs",
+    )
+    argparser.add_argument(
+        "--accumulate_updates",
+        type=int,
+        default=1,
+        help=(
+            "if specified, updates are applied only for each N steps. this is "
+            "used for simulating training with a larger batch size."
+        ),
+    )
+    argparser.add_argument(
+        "--multi_process",
+        type=bool,
+        default=None,
+        help=(
+            "set True, if the training processes are launched on multiple "
+            "hosts for parallel training. currently, only CloudTPU, Slurm, or "
+            "OpenMPI launchers are supported."
+        ),
+    )
+    argparser.add_argument(
+        "--max_steps",
+        type=int,
+        default=None,
+        help="if specified, process is finished after the specified steps",
+    )
+    argparser.add_argument(
+        "--model_size",
+        type=str,
+        default="DEBUG",
+        help=(
+            "model configuration specifier. must be one of the following "
+            'options: "DEBUG", "100M"'
+        ),
+    )
 
     args = argparser.parse_args()
     main(args)

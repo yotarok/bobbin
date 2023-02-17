@@ -141,13 +141,12 @@ class LibriSpeechExampleTest(absltest.TestCase):
             args.log_dir_path = epath.Path(logdir)
             args.max_steps = 1
 
-            # The rests are default.
             args.tfds_data_dir = None
             args.feature_normalizer = None
             args.per_device_batch_size = 8
             args.wpm_vocab = None
             args.wpm_size_limit = 32
-            args.split_training_batch = None
+            args.accumulate_updates = 2
             args.multi_process = None
             args.model_size = "UNITTEST"
 
