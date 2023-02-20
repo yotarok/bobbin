@@ -39,6 +39,8 @@ Basic usage
 
    train_task
 
+   eval_task
+
    pmap_util
 
    var_util
