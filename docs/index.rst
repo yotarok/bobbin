@@ -37,6 +37,8 @@ Basic usage
    :caption: Basic Usage
    :maxdepth: 1
 
+   train_task
+
    pmap_util
 
    var_util
