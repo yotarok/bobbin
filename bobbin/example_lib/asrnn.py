@@ -330,17 +330,6 @@ class ConformerFfnBlock(nn.Module):
         return x
 
 
-def _paddings_to_mask(paddings: Array) -> Array:
-    """Converts padding indicators into mask patterns for attention."""
-    *batch_sizes, time_steps = paddings.shape
-    flat_batch_size = np.product(batch_sizes) if batch_sizes else 1
-    flat_paddings = paddings.reshape((flat_batch_size, time_steps))
-    flat_padding_mask = (
-        jax.vmap(lambda p: p[:, np.newaxis] + p[np.newaxis, :])(flat_paddings) < 0.5
-    )
-    return flat_padding_mask.reshape(tuple(batch_sizes) + (1, time_steps, time_steps))
-
-
 class ConformerMhsaBlock(nn.Module):
     """Multi-head self-attention module used in Conformer blocks.
 
@@ -369,8 +358,13 @@ class ConformerMhsaBlock(nn.Module):
         )
         x = nn.LayerNorm()(x)
 
-        padding_mask = _paddings_to_mask(x_paddings)
-        x = nn.SelfAttention(self.num_heads, dropout_rate=self.attention_dropout_prob)(
+        padding_mask = nn.make_attention_mask(
+            x_paddings < 0.5, x_paddings < 0.5, dtype=jnp.float32
+        )
+        x = nn.SelfAttention(
+            self.num_heads,
+            dropout_rate=self.attention_dropout_prob,
+        )(
             x,
             mask=padding_mask,
             deterministic=deterministic,

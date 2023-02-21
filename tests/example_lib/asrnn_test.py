@@ -1,5 +1,4 @@
-# Copyright 2022 Google LLC
-#
+# Copyright 2022 Google LLC#
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
 # You may obtain a copy of the License at
@@ -152,20 +151,6 @@ class ConformerMhsaBlockTest(chex.TestCase):
             ),
             dict(deterministic=deterministic),
         )
-
-    def test_mask(self):
-        batch_size = 3
-        max_length = 7
-        paddings = (np.random.uniform(size=(batch_size, max_length)) > 0.5).astype(
-            np.float32
-        )
-        mask = asrnn._paddings_to_mask(paddings)
-
-        for i in range(batch_size):
-            for query_t in range(max_length):
-                for key_t in range(max_length):
-                    expected = paddings[i, query_t] < 0.5 and paddings[i, key_t] < 0.5
-                    np.testing.assert_equal(bool(mask[i, 0, query_t, key_t]), expected)
 
 
 class ConformerBlockTest(chex.TestCase):
