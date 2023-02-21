@@ -831,7 +831,14 @@ def main(args: argparse.Namespace):
     )
     bobbin.publish_trainer_env_info(train_writer, train_state)
     train_writer.text(
-        "fiddle_hparams", printing.as_str_flattened(train_task_cfg), step=0
+        "fiddle_hparams",
+        "```\n" + printing.as_str_flattened(train_task_cfg) + "\n```",
+        step=0,
+    )
+    train_writer.text(
+        "fiddle_hparams_opt",
+        "```\n" + printing.as_str_flattened(opt_cfg) + "\n```",
+        step=0,
     )
     # Seeting up crontab (auxiliary actions periodically executed during the training)
     eval_freq = num_train_samples // global_batch_size
