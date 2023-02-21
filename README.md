@@ -1,5 +1,6 @@
 # Bobbin
 
+![Unittest](https://github.com/yotarok/bobbin/actions/workflows/lint_and_test.yml/badge.svg)
 [![Documentation Status](https://readthedocs.org/projects/bobbin/badge/?version=latest)](http://bobbin.readthedocs.io)
 
 ## What is this?
