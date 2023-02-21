@@ -31,7 +31,6 @@ def _get_version():
 
 
 def _parse_requirements(path):
-
     with open(os.path.join(_CURRENT_DIR, path)) as f:
         return [
             line.rstrip() for line in f if not (line.isspace() or line.startswith("#"))
@@ -42,7 +41,7 @@ setup(
     name="bobbin",
     version=_get_version(),
     url="https://github.com/yotarok/bobbin",
-    author="Yotaro Kubo",
+    author="Bobbin Team",
     description=("Tools for making training loops with flax.linen models."),
     long_description=open(os.path.join(_CURRENT_DIR, "README.md")).read(),
     long_description_content_type="text/markdown",
@@ -56,7 +55,7 @@ setup(
         os.path.join(_CURRENT_DIR, "requirements", "requirements-test.txt")
     ),
     zip_safe=False,  # Required for full installation.
-    python_requires=">=3.7",
+    python_requires=">=3.8",
     classifiers=[
         "Development Status :: 1 - Planning",
         "Environment :: Console",
