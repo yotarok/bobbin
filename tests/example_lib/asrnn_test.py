@@ -138,8 +138,11 @@ class ConformerFfnBlockTest(chex.TestCase):
 
 
 class ConformerMhsaBlockTest(chex.TestCase):
-    @parameterized.named_parameters(("normal", False), ("deterministic", True))
-    def test_sanity(self, deterministic):
+    @parameterized.product(
+        deterministic=[False, True],
+        use_query_scaler=[False, True],
+    )
+    def test_sanity(self, deterministic, use_query_scaler):
         batch_size = 3
         max_length = 5
         model_dims = 16
@@ -150,6 +153,7 @@ class ConformerMhsaBlockTest(chex.TestCase):
                 _random_right_paddings(batch_size, max_length, min_length=1),
             ),
             dict(deterministic=deterministic),
+            init_kwargs=dict(use_query_scaler=use_query_scaler),
         )
 
 

@@ -384,8 +384,54 @@ class ConformerMhsaBlock(nn.Module):
     attention_dropout_prob: float = 0
     deterministic: Optional[bool] = None
 
+    use_query_scaler: bool = True
+    query_scale_init: InitializerFn = nn.initializers.zeros_init()
+
     kernel_init: InitializerFn = default_kernel_init
     bias_init: InitializerFn = nn.initializers.zeros_init()
+
+    def _attention_fn(
+        self,
+        query,
+        key,
+        value,
+        bias=None,
+        mask=None,
+        broadcast_dropout=True,
+        dropout_rng=None,
+        dropout_rate=0.0,
+        deterministic=False,
+        dtype=None,
+        precision=None,
+    ):
+        if self.use_query_scaler:
+            scale_param = self.param(
+                "query_scale", self.query_scale_init, (query.shape[-1],)
+            )
+            r_softplus_0 = 1.442695041
+            scale = r_softplus_0 * jax.nn.softplus(scale_param)
+            scale = scale.reshape((1,) * (query.ndim - 1) + (-1,))
+            query = query * scale
+
+        attn_weights = nn.dot_product_attention_weights(
+            query,
+            key,
+            bias,
+            mask,
+            broadcast_dropout,
+            dropout_rng,
+            dropout_rate,
+            deterministic,
+            dtype,
+            precision,
+        )
+
+        # Copied from flax/linen/attention.py.
+
+        # return weighted sum over values for each query position
+        return jnp.einsum(
+            "...hqk,...khd->...qhd", attn_weights, value, precision=precision
+        )
 
     @nn.compact
     def __call__(
@@ -406,6 +452,8 @@ class ConformerMhsaBlock(nn.Module):
             dropout_rate=self.attention_dropout_prob,
             kernel_init=self.kernel_init,
             bias_init=self.bias_init,
+            attention_fn=self._attention_fn,
+            broadcast_dropout=False,
         )(
             x,
             mask=padding_mask,
