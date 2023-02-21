@@ -60,4 +60,4 @@ from .var_util import total_dimensionality
 from .var_util import write_pytree_json_file
 
 
-__version__ = "0.0.1"
+__version__ = "0.0.2"
