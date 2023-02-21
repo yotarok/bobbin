@@ -65,10 +65,10 @@ if "READTHEDOCS" in os.environ:
     _recursive_add_annotations_import()
 
 sys.path.insert(0, os.path.abspath("../"))
-# sys.path.append(os.path.abspath("ext"))
 
 import bobbin
 
+# KaTex not used so far.
 # from sphinxcontrib import katex
 
 # -- Project information -----------------------------------------------------
@@ -119,13 +119,20 @@ autodoc_default_options = {
 # The theme to use for HTML and HTML Help pages.  See the documentation for
 # a list of builtin themes.
 #
-html_theme = "sphinx_rtd_theme"
+html_theme = "sphinx_book_theme"
 
 # Add any paths that contain custom static files (such as style sheets) here,
 # relative to this directory. They are copied after the builtin static files,
 # so a file named "default.css" will overwrite the builtin "default.css".
 html_static_path = []
 # html_favicon = '_static/favicon.ico'
+
+html_theme_options = {
+    "show_toc_level": 2,
+    "repository_url": "https://github.com/yotarok/bobbin",
+    "use_repository_button": True,  # add a "link to repository" button
+}
+
 
 # -- Options for katex ------------------------------------------------------
 

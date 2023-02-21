@@ -29,11 +29,15 @@ Installation
 
    pip install bobbin
 
-Basic usage
-^^^^^^^^^^^
+License
+^^^^^^^
+
+Bobbin is licensed under the Apache 2.0 License.
+
+Contents
+^^^^^^^^
 
 .. toctree::
-   :hidden:
    :caption: Basic Usage
    :maxdepth: 1
 
@@ -46,12 +50,9 @@ Basic usage
    var_util
 
 
-API documentation
-^^^^^^^^^^^^^^^^^
-
 .. toctree::
-   :hidden:
-   :maxdepth: 1
-   :caption: API
+   :maxdepth: 2
+   :caption: API Reference
 
-   api
+   API reference <api>
+
