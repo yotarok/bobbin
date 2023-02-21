@@ -349,6 +349,12 @@ class CtcAsrTask(bobbin.TrainTask):
         tb_vars = updated_vars["tensorboard"].unfreeze()
         tb_vars["loss"] = bobbin.ScalarSummary(loss)
         tb_vars["learn_rate"] = bobbin.ScalarSummary(self._learn_rate_fn(step))
+
+        param_norm_sq = jax.tree_util.tree_reduce(
+            lambda acc, x: acc + jnp.sum(x * x), params, 0.0
+        )
+        tb_vars["param_l2_norm"] = bobbin.ScalarSummary(jnp.sqrt(param_norm_sq))
+
         updated_vars = updated_vars.copy(dict(tensorboard=tb_vars))
 
         return loss, (
