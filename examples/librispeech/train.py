@@ -336,11 +336,10 @@ class CtcAsrTask(bobbin.TrainTask):
             logits, logit_paddings, batch["tokens"], batch["token_paddings"]
         )
 
-        # CTC loss is normalized using the numbers of tokens. The numbers of
-        # tokens can be obtained by using the pading indicators.
-        num_tokens = jnp.maximum(jnp.sum(1.0 - batch["token_paddings"], axis=-1), 1.0)
-        per_token_loss = per_sample_loss / num_tokens
-        loss = jnp.mean(per_token_loss)
+        # CTC loss is normalized per batch using the numbers of tokens. The
+        # numbers of tokens can be obtained by using the padding indicators.
+        num_tokens = jax.lax.pmean(np.sum(1.0 - batch["token_paddings"]), "batch")
+        loss = jnp.sum(per_sample_loss) / jnp.maximum(num_tokens, 1.0)
 
         # Update TensorBoard variables so it includes learning rate and loss
         # values.
