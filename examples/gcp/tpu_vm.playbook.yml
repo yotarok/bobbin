@@ -14,7 +14,7 @@
     vm_version: tpu-vm-base
   tasks:
     - name: Enabling TPU API
-      ansible.builtin.shell:
+      ansible.builtin.command:
         cmd: gcloud --quiet services enable tpu.googleapis.com --project {{ vars.project }}
       register: enable_api_result
       changed_when: "'successfully' in enable_api_result.stderr"
@@ -22,7 +22,8 @@
       ansible.builtin.shell:
         cmd: |
           NUM_VMS=$(gcloud --quiet compute tpus tpu-vm list --zone {{ vars.zone }} \
-             --project {{ vars.project }} --format json | jq '. | length')
+            --project {{ vars.project }} --filter "name:{{ vars.node_name }}" \
+            --format json | jq '. | length')
           if [[ 0 -eq "${NUM_VMS}" ]]; then
             gcloud --quiet compute tpus tpu-vm create {{ vars.node_name }} --zone {{ vars.zone }} \
               --project {{ vars.project }} --accelerator-type {{ vars.accelerator_type }} \
@@ -54,6 +55,7 @@
               --format json \
               | jq '.networkEndpoints[].accessConfig.externalIp' -r
       register: ssh_endpoint_results
+      # noqa no-changed-when
     - name: Setting SSH host IP address
       ansible.builtin.add_host:
         name: "{{ item }}"
