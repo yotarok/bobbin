@@ -16,7 +16,8 @@
 """
 
 # This sample is for demonstrating scalability to a large scale problem.
-# See also "examples/gcp/README.md" for how to run this example script.
+# See also "examples/gcp/README.md" for how to run this example script on
+# TPU environments.
 #
 # For understanding how multi-process training work in Jax, please refer
 # the document: https://jax.readthedocs.io/en/latest/multi_process.html
@@ -60,8 +61,8 @@ VarCollection = bobbin.VarCollection
 
 
 # Similar to the MNIST example, the first part of this script is about data
-# and resource handling. You can skip most of them; however, there's an
-# important step for distributed training in `prepare_batch` function.
+# and resource . You can skip most of them; however, there's an important step
+# for distributed training in `prepare_datasets` function.
 
 _DEFAULT_WPM_VOCAB_URL = "https://raw.githubusercontent.com/tensorflow/lingvo/master/lingvo/tasks/asr/wpm_16k_librispeech.vocab"  # noqa: E501
 
@@ -221,7 +222,7 @@ def prepare_datasets(
     )
 
 
-# Similar to MNIST sample, we define a neural network to be optimized as
+# Similar to MNIST example, we define a neural network to be optimized as
 # `flax.linen.Module`.  We don't go details of this implementation. It is a
 # simple module that takes `waveform` and `waveform_paddings` as inputs, and
 # returns `logits` and `logit_paddings` as outputs.  Here, `*_paddings` is used
@@ -646,40 +647,6 @@ class Optimizer(struct.PyTreeNode):
     learn_rate: optax.Schedule
 
 
-# Fiddle configurator for `Optimizer`.
-def make_optimizer_config() -> fdl.Config[Optimizer]:
-    learn_rate_cfg = fdl.Config(transformer_schedule)
-    tx_cfg = fdl.Config(asrnn.adamw_with_clipping, learn_rate_cfg, weight_decay=1e-6)
-    return fdl.Config(Optimizer, tx=tx_cfg, learn_rate=learn_rate_cfg)
-
-
-# This example doesn't use "autoconfig" feature of Fiddle. So, config building
-# is explicitly separated here as a function.
-def make_train_task_config(
-    num_outputs: int,
-    feature_normalizer: asrio.MeanVarNormalizer,
-    speech_shape: Sequence[int],
-    opt_config: fdl.Config[Optimizer],
-) -> fdl.Config[CtcAsrTask]:
-    default_depth = 4
-    model_cfg = fdl.Config(
-        CtcAsrModel,
-        feature_normalizer=feature_normalizer,
-        frontend=fdl.Config(asrnn.LogMelFilterBank),
-        encoder=fdl.Config(
-            asrnn.CnnConformerEncoder,
-            cnn=fdl.Config(asrnn.CnnEncoder),
-            conformer_blocks=tuple(
-                fdl.Config(asrnn.ConformerBlock)
-                for unused_depth in range(default_depth)
-            ),
-        ),
-        specaug=fdl.Config(asrnn.SpecAug),
-        classifier=fdl.Config(nn.Dense, features=num_outputs),
-    )
-    return fdl.Config(CtcAsrTask, model_cfg, opt_config.learn_rate, speech_shape)
-
-
 # The following two utility functions are for simplifying command-line
 # arguments.
 #
@@ -714,6 +681,110 @@ def _is_running_on_cloud_tpu_vm() -> bool:
     except ImportError:
         pass
     return os.environ.get("CLOUDSDK_PYTHON", None) is not None and libtpu_found
+
+
+# This example program supports multiple model configuration other than
+# "default" (that is a small model for debugging purpose). Here, we define
+# a set of configuration functions.
+_OptimizerAndTaskConfig = Tuple[fdl.Config[Optimizer], fdl.Config[CtcAsrTask]]
+
+
+@dataclasses.dataclass
+class Configurator:
+    speech_shape: Tuple[int, ...]
+    vocab_size: int
+    feature_normalizer: asrio.MeanVarNormalizer
+
+    @classmethod
+    def supported_config_names(cls):
+        return ["default", "unittest", "p100m_preln", "debug"]
+
+    def debug(self) -> _OptimizerAndTaskConfig:
+        """A model for debugging consisting of 4 layers of 256-dim Conformers."""
+        learn_rate_cfg = fdl.Config(transformer_schedule)
+        tx_cfg = fdl.Config(
+            asrnn.adamw_with_clipping, learn_rate_cfg, weight_decay=1e-6
+        )
+        opt_cfg = fdl.Config(Optimizer, tx=tx_cfg, learn_rate=learn_rate_cfg)
+
+        default_depth = 4
+        model_cfg = fdl.Config(
+            CtcAsrModel,
+            feature_normalizer=self.feature_normalizer,
+            frontend=fdl.Config(asrnn.LogMelFilterBank),
+            encoder=fdl.Config(
+                asrnn.CnnConformerEncoder,
+                cnn=fdl.Config(asrnn.CnnEncoder),
+                conformer_blocks=tuple(
+                    fdl.Config(asrnn.ConformerBlock)
+                    for unused_depth in range(default_depth)
+                ),
+            ),
+            specaug=fdl.Config(asrnn.SpecAug),
+            classifier=fdl.Config(nn.Dense, features=self.vocab_size),
+        )
+        task_cfg = fdl.Config(
+            CtcAsrTask, model_cfg, opt_cfg.learn_rate, self.speech_shape
+        )
+
+        return opt_cfg, task_cfg
+
+    def default(self) -> _OptimizerAndTaskConfig:
+        """Default model, currently "debug"."""
+        return self.debug()
+
+    def unittest(self) -> _OptimizerAndTaskConfig:
+        """Unittest model only for checking if the step function works."""
+        opt_cfg, task_cfg = self.default()
+        task_cfg.model.encoder.cnn.channels = (5, 5)
+        task_cfg.model.encoder.cnn.num_outputs = 16
+        block_cfg = copy.deepcopy(task_cfg.model.encoder.conformer_blocks[0])
+        block_cfg.kernel_size = 3
+        task_cfg.model.encoder.conformer_blocks = tuple(
+            copy.deepcopy(block_cfg) for unused_d in range(2)
+        )
+        return opt_cfg, task_cfg
+
+    def p100m_preln(self) -> _OptimizerAndTaskConfig:
+        """100m parameter model.
+
+        This is ConformerL model described in the original paper:
+          https://arxiv.org/abs/2005.08100, but without final LayerNorm in
+        Conformer blocks. Skipping final layer norms found out to be important
+        for stable optimization.  This modification makes the Conformer network
+        more similar to the PreLN transformer described in:
+        https://arxiv.org/abs/2002.04745
+        """
+        opt_cfg, task_cfg = self.default()
+        model_width = 512
+        task_cfg.model.encoder.cnn.num_outputs = model_width
+        block_cfg = copy.deepcopy(task_cfg.model.encoder.conformer_blocks[0])
+        block_cfg.kernel_size = 32
+        block_cfg.mhsa_attention_dropout_prob = 0.1
+
+        block_cfg.skip_final_ln = True  # Skip final LN
+
+        task_cfg.model.encoder.conformer_blocks = tuple(
+            copy.deepcopy(block_cfg) for unused_d in range(17)
+        )
+        task_cfg.model.encoder.num_outputs = model_width
+        opt_cfg.learn_rate.model_dims = model_width
+        opt_cfg.learn_rate.base_learn_rate = 5.0
+        opt_cfg.tx.weight_decay = 0.0
+        opt_cfg.tx.b1 = 0.9
+        opt_cfg.tx.b2 = 0.98
+        opt_cfg.tx.eps = 1e-9
+        opt_cfg.tx.l2_penalty = 1e-6
+        return opt_cfg, task_cfg
+
+    def get_config_by_name(self, name: str) -> _OptimizerAndTaskConfig:
+        config_fn = getattr(self, name.lower(), None)
+        if config_fn is None:
+            raise ValueError(
+                f"Unsupported model {name}. "
+                f"Supported types = {type(self).supported_config_names()}"
+            )
+        return config_fn()
 
 
 # Finally, main function is here and it is not so different from that of the
@@ -762,9 +833,9 @@ def main(args: argparse.Namespace):
                 f.read(), asrio.MeanVarNormalizer.empty()
             )
 
-    # This example is also for demonstrating Fiddle, and Fiddle first
-    # constructs config object before actual instances being built.
-    opt_cfg = make_optimizer_config()
+    opt_cfg, task_cfg = Configurator(
+        speech_shape, len(wpm_vocab), normalizer
+    ).get_config_by_name(args.model_type)
 
     # and thanks to flexibility of Fiddle, it's very easy to attach
     # multi-step update feature (a memory-saving technique that simulates
@@ -776,35 +847,9 @@ def main(args: argparse.Namespace):
             optax.MultiSteps, original_tx, every_k_schedule=args.accumulate_updates
         )
 
-    train_task_cfg = make_train_task_config(
-        len(wpm_vocab), normalizer, speech_shape, opt_cfg
-    )
-
-    # Fiddle provides us freedom to modify some hyperparemeter here.
-    if args.model_size.upper() == "100M":
-        train_task_cfg.model.encoder.cnn.num_outputs = 512
-        block_cfg = copy.deepcopy(train_task_cfg.model.encoder.conformer_blocks[0])
-        block_cfg.kernel_size = 32
-        train_task_cfg.model.encoder.conformer_blocks = tuple(
-            copy.deepcopy(block_cfg) for unused_d in range(17)
-        )
-        opt_cfg.learn_rate.model_dims = 512
-    elif args.model_size.upper() == "DEBUG":
-        pass
-    elif args.model_size.upper() == "UNITTEST":
-        train_task_cfg.model.encoder.cnn.channels = (5, 5)
-        train_task_cfg.model.encoder.cnn.num_outputs = 16
-        block_cfg = copy.deepcopy(train_task_cfg.model.encoder.conformer_blocks[0])
-        block_cfg.kernel_size = 3
-        train_task_cfg.model.encoder.conformer_blocks = tuple(
-            copy.deepcopy(block_cfg) for unused_d in range(2)
-        )
-    else:
-        raise ValueError("model_size should be one of: '100m' or 'debug")
-
     # Actual optimizer and task are built with `fdl.build` as follows
     opt = fdl.build(opt_cfg)
-    task = fdl.build(train_task_cfg)
+    task = fdl.build(task_cfg)
 
     # Here, we configure model, optimizer, and tasks.
     evaler = EvalTask(task.model, wpm_vocab)
@@ -832,7 +877,7 @@ def main(args: argparse.Namespace):
     bobbin.publish_trainer_env_info(train_writer, train_state)
     train_writer.text(
         "fiddle_hparams",
-        "```\n" + printing.as_str_flattened(train_task_cfg) + "\n```",
+        "```\n" + printing.as_str_flattened(task_cfg) + "\n```",
         step=0,
     )
     train_writer.text(
@@ -954,13 +999,11 @@ if __name__ == "__main__":
         help="if specified, process is finished after the specified steps",
     )
     argparser.add_argument(
-        "--model_size",
+        "--model_type",
         type=str,
-        default="DEBUG",
-        help=(
-            "model configuration specifier. must be one of the following "
-            'options: "DEBUG", "100M"'
-        ),
+        default="default",
+        choices=Configurator.supported_config_names(),
+        help=("model configuration specifier"),
     )
 
     args = argparser.parse_args()

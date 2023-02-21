@@ -148,7 +148,7 @@ class LibriSpeechExampleTest(absltest.TestCase):
             args.wpm_size_limit = 32
             args.accumulate_updates = 2
             args.multi_process = None
-            args.model_size = "UNITTEST"
+            args.model_type = "unittest"
 
             librispeech.train.main(args)
 
