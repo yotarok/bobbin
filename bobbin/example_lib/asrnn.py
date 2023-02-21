@@ -407,6 +407,12 @@ class ConformerBlock(nn.Module):
     ffn_hidden_dropout_prob: float = 0
     is_eval: Optional[bool] = None
 
+    skip_head_ffn: bool = False
+    skip_mhsa: bool = False
+    skip_lconv: bool = False
+    skip_tail_ffn: bool = False
+    skip_final_ln: bool = False
+
     @nn.compact
     def __call__(
         self, x: Array, x_paddings: Array, is_eval: Optional[bool] = None
@@ -416,29 +422,34 @@ class ConformerBlock(nn.Module):
 
         *unused_batch_sizes, unused_time_stesps, model_dims = x.shape
 
-        x = ConformerFfnBlock(
-            hidden_dims=int(model_dims * self.ffn_width_multiplier),
-            hidden_dropout_prob=self.ffn_hidden_dropout_prob,
-            residual_dropout_prob=self.ffn_residual_dropout_prob,
-        )(x, deterministic=is_eval)
+        if not self.skip_head_ffn:
+            x = ConformerFfnBlock(
+                hidden_dims=int(model_dims * self.ffn_width_multiplier),
+                hidden_dropout_prob=self.ffn_hidden_dropout_prob,
+                residual_dropout_prob=self.ffn_residual_dropout_prob,
+            )(x, deterministic=is_eval)
 
-        x = ConformerMhsaBlock(
-            residual_dropout_prob=self.mhsa_residual_dropout_prob,
-            attention_dropout_prob=self.mhsa_attention_dropout_prob,
-        )(x, x_paddings, deterministic=is_eval)
+        if not self.skip_mhsa:
+            x = ConformerMhsaBlock(
+                residual_dropout_prob=self.mhsa_residual_dropout_prob,
+                attention_dropout_prob=self.mhsa_attention_dropout_prob,
+            )(x, x_paddings, deterministic=is_eval)
 
-        x = ConformerConvBlock(
-            kernel_size=self.kernel_size,
-            residual_dropout_prob=self.conv_residual_dropout_prob,
-        )(x, x_paddings, deterministic=is_eval)
+        if not self.skip_lconv:
+            x = ConformerConvBlock(
+                kernel_size=self.kernel_size,
+                residual_dropout_prob=self.conv_residual_dropout_prob,
+            )(x, x_paddings, deterministic=is_eval)
 
-        x = ConformerFfnBlock(
-            hidden_dims=int(model_dims * self.ffn_width_multiplier),
-            hidden_dropout_prob=self.ffn_hidden_dropout_prob,
-            residual_dropout_prob=self.ffn_residual_dropout_prob,
-        )(x, deterministic=is_eval)
+        if not self.skip_tail_ffn:
+            x = ConformerFfnBlock(
+                hidden_dims=int(model_dims * self.ffn_width_multiplier),
+                hidden_dropout_prob=self.ffn_hidden_dropout_prob,
+                residual_dropout_prob=self.ffn_residual_dropout_prob,
+            )(x, deterministic=is_eval)
 
-        x = nn.LayerNorm()(x)
+        if not self.skip_final_ln:
+            x = nn.LayerNorm()(x)
 
         return x, x_paddings
 
