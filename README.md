@@ -1,5 +1,9 @@
 # Bobbin
 
+[![Documentation Status](https://readthedocs.org/projects/bobbin/badge/?version=latest)](http://bobbin.readthedocs.io)
+
+## What is this?
+
 A small tool for making neural net training loop with flax.linen.
 
 This library is designed to be a set of small tools and not to be a full-blown
