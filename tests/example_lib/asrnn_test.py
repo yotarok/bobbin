@@ -29,6 +29,7 @@ import flax
 import flax.linen as nn
 import jax
 import numpy as np
+import optax
 
 
 def _random_right_paddings(batch_size: int, max_length: int, *, min_length: int = 0):
@@ -370,6 +371,71 @@ class PaddedBatchNormTest(chex.TestCase):
 
         # and neither does this.
         module.apply(mod_vars, x, x_paddings, use_running_average=True)
+
+
+class ClippedAdamWTest(chex.TestCase):
+    @unittest.mock.patch("optax.scale_by_adam")
+    def test_block_update_normalization(self, adam):
+        threshold = 0.7
+
+        adam.return_value = optax.identity()
+
+        tx = asrnn.adamw_with_clipping(
+            -1.0,
+            b1=0.9,
+            b2=0.98,
+            eps=0.01,
+            eps_root=0.0,
+            block_update_rms_threshold=threshold,
+            global_gradient_norm_threshold=None,
+        )
+
+        adam.assert_called_once_with(
+            b1=0.9, b2=0.98, eps=0.01, eps_root=0.0, mu_dtype=None
+        )
+        params = (np.zeros((3, 3)), np.zeros((2, 2)))
+        gradients = (
+            -(threshold + 0.1) * np.ones((3, 3)),
+            (threshold - 0.1) * np.ones((2, 2)),
+        )
+
+        opt_state = tx.init(params)
+        updates, unused_next_opt_state = tx.update(gradients, opt_state, params)
+
+        np.testing.assert_allclose(updates[1], gradients[1])
+        np.testing.assert_allclose(
+            updates[0],
+            gradients[0] * threshold / (threshold + 0.1),
+        )
+
+    @unittest.mock.patch("optax.scale_by_adam")
+    def test_global_gradient_clipping(self, adam):
+        threshold = 1.0
+
+        adam.return_value = optax.identity()
+        tx = asrnn.adamw_with_clipping(
+            -1.0,
+            block_update_rms_threshold=None,
+            global_gradient_norm_threshold=threshold,
+        )
+        adam.assert_called_once()
+
+        params = (np.zeros((3, 3)), np.zeros((4, 4)))
+        gradients = (
+            np.ones((3, 3), np.float32),
+            np.ones((4, 4), np.float32),
+        )
+        opt_state = tx.init(params)
+        updates, unused_next_opt_state = tx.update(gradients, opt_state, params)
+
+        expected_norm = 5.0
+        expected_scaler = threshold / expected_norm
+        np.testing.assert_allclose(
+            updates[0], expected_scaler * gradients[0], rtol=1e-5, atol=1e-5
+        )
+        np.testing.assert_allclose(
+            updates[1], expected_scaler * gradients[1], rtol=1e-5, atol=1e-5
+        )
 
 
 if __name__ == "__main__":
