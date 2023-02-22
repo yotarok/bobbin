@@ -106,7 +106,7 @@ class ThreadedSummaryWriter(flax_tb.SummaryWriter):
           max_workers: the number of I/O thread.
           wait_on_flush: if True, `ThreadedSummaryWriter.flush` waits for all
             the write ops finished. Otherwise (by default), flush operation is
-            also deferred and evetually executed.
+            also deferred and eventually executed.
         """
         self._writer = base_writer
         self._max_workers = max_workers
@@ -186,8 +186,6 @@ def _default_dirname_from_key(key: str) -> str:
 
 class MultiDirectorySummaryWriter(flax_tb.SummaryWriter):
     """SummaryWriter that changes the destination depending on the tag.
-
-    Note that this class is currently not exposed to users, and there's no
     actual usecases for wrapping functions like `scalar`.
     """
 
@@ -218,8 +216,8 @@ class MultiDirectorySummaryWriter(flax_tb.SummaryWriter):
             `jax.process_index() != 0`.
           auto_flush: if True, sub-writers are instantiated with
             `auto_flush=True` argument.
-          tag_to_key: a function that extracts subwriter names and tag names
-            used in the subwriter from the tags. default is a function
+          tag_to_key: a function that extracts sub-writer names and tag names
+            used in the sub-writer from the tags. default is a function
             equivalent to `lambda s: s.split('/', maxsplit=1)`.
           dirname: a function that converts keys to the directory names under
             the root directory.
@@ -460,7 +458,7 @@ def publish_trainer_env_info(
 ) -> None:
     """Publishes environment information to Tensorboard "Text" section.
 
-    Currently, this function publishes the following informations.
+    Currently, this function publishes the following information.
 
     - The numbers of parameters and extra variables in the model.
     - Shape information of the parameter tree.
