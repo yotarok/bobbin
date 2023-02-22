@@ -4,7 +4,7 @@ Bobbin
 
 Bobbin is a complemental tool for building training loop with Flax.
 This is not intended to be a full-scale framework, rather it is something you
-can partally import and use (for typically small experiments that don't require
+can partially import and use (for typically small experiments that don't require
 frameworks.)
 
 Features

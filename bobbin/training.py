@@ -53,7 +53,7 @@ PRNGKey = chex.PRNGKey
 class TrainState(flax.training.train_state.TrainState):
     """Thin-wrapper to `flax.training.train_state.TrainState`.
 
-    This class is introduced to accomodate `extra_vars` field for handling
+    This class is introduced to accommodate `extra_vars` field for handling
     mutable (non-trainable) variables.
     """
 
