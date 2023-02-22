@@ -16,6 +16,7 @@
 from __future__ import annotations
 
 import abc
+import concurrent
 import functools
 import logging
 import sys
@@ -81,6 +82,99 @@ class NullSummaryWriter:
         return f
 
 
+class ThreadedSummaryWriter(flax_tb.SummaryWriter):
+    """SummaryWriter that writes summaries in a separate thread.
+
+    This writer defers write operations (including flush operation) and returns
+    from the function as soon as possible. However, by design, the transfer
+    from devices to CPU memory is not deferred. Therefore, the latency of method
+    calls will be dominated by memory transfer. This is important so devices can
+    release the memory used for storing summaries as soon as the write method
+    is called.
+    """
+
+    def __init__(
+        self,
+        base_writer: flax_tb.SummaryWriter,
+        max_workers: int = 1,
+        wait_on_flush: bool = False,
+    ):
+        """Constructs `ThreadedSummaryWriter` that wraps `base_writer`.
+
+        Args:
+          base_writer: `SummaryWriter` or a compatible instance to be wrapped.
+          max_workers: the number of I/O thread.
+          wait_on_flush: if True, `ThreadedSummaryWriter.flush` waits for all
+            the write ops finished. Otherwise (by default), flush operation is
+            also deferred and evetually executed.
+        """
+        self._writer = base_writer
+        self._max_workers = max_workers
+        self._executor = concurrent.futures.ThreadPoolExecutor(
+            max_workers=self._max_workers
+        )
+        self._wait_on_flush = wait_on_flush
+
+    @classmethod
+    def open(cls, log_dir, auto_flush: bool = True):
+        """Constructs `ThreadedSummaryWriter` with given `log_dir`."""
+        return cls(flax_tb.SummaryWriter(log_dir, auto_flush=auto_flush))
+
+    def _join_and_execute(self, f: Callable[[], Any]):
+        self._executor.shutdown()
+        f()
+        self._executor = concurrent.futures.ThreadPoolExecutor(
+            max_workers=self._max_workers
+        )
+
+    @functools.wraps(flax_tb.SummaryWriter.close)
+    def close(self):
+        self._join_and_execute(self._writer.close)
+
+    @functools.wraps(flax_tb.SummaryWriter.flush)
+    def flush(self):
+        if self._wait_on_flush:
+            self._join_and_execute(self._writer.flush)
+        else:
+            self._executor.submit(lambda: self._writer.flush())
+
+    @functools.wraps(flax_tb.SummaryWriter.scalar)
+    def scalar(self, tag, value, step):
+        step, value = jax.tree_util.tree_map(np.asarray, (step, value))
+        self._executor.submit(lambda: self._writer.scalar(tag, value, step))
+
+    @functools.wraps(flax_tb.SummaryWriter.image)
+    def image(self, tag, image, step, max_outputs=3):
+        step, image = jax.tree_util.tree_map(np.asarray, (step, image))
+        self._executor.submit(lambda: self._writer.image(tag, image, step, max_outputs))
+
+    @functools.wraps(flax_tb.SummaryWriter.audio)
+    def audio(self, tag, audiodata, step, sample_rate=44100, max_outputs=3):
+        step, audiodata = jax.tree_util.tree_map(np.asarray, (step, audiodata))
+        self._executor.submit(
+            lambda: self._writer.audio(tag, audiodata, step, sample_rate, max_outputs)
+        )
+
+    @functools.wraps(flax_tb.SummaryWriter.histogram)
+    def histogram(self, tag, values, step, bins=None):
+        step, values = jax.tree_util.tree_map(np.asarray, (step, values))
+        self._executor.submit(lambda: self._writer.histogram(tag, values, step, bins))
+
+    @functools.wraps(flax_tb.SummaryWriter.text)
+    def text(self, tag, textdata, step):
+        step = np.asarray(step)
+        self._executor.submit(lambda: self._writer.text(tag, textdata, step))
+
+    @functools.wraps(flax_tb.SummaryWriter.write)
+    def write(self, tag, tensor, step, metadata=None):
+        step, tensor = jax.tree_util.tree_map(np.asarray, (step, tensor))
+        self._executor.submit(lambda: self._writer.write(tag, tensor, step, metadata))
+
+    @functools.wraps(flax_tb.SummaryWriter.hparams)
+    def hparams(self, hparams):
+        self._executor.submit(lambda: self._writer.hparams(hparams))
+
+
 def _default_key_from_tag(tag: str) -> Tuple[str, str]:
     key, rest = tag.split("/", maxsplit=1)
     return key, rest
@@ -111,6 +205,7 @@ class MultiDirectorySummaryWriter(flax_tb.SummaryWriter):
         auto_flush: bool = True,
         tag_to_key: Callable[[str], Tuple[str, str]] = _default_key_from_tag,
         dirname: Callable[[str], str] = _default_dirname_from_key,
+        use_threaded_writer: bool = True,
     ):
         """Constructs `MultiDirectorySummaryWriter`.
 
@@ -134,6 +229,7 @@ class MultiDirectorySummaryWriter(flax_tb.SummaryWriter):
         self._dirname_fn = dirname
         self._auto_flush = auto_flush
         self._use_null = only_from_leader_process and jax.process_index() != 0
+        self._use_threaded_writer = use_threaded_writer
 
         self._writers = dict()
         # Instantiate writers for pre-specified keys
@@ -141,6 +237,16 @@ class MultiDirectorySummaryWriter(flax_tb.SummaryWriter):
         for key in keys:
             self.subwriter(key)
         self._allow_new_keys = False  # It is forbidden once
+
+    def _make_subwriter(
+        self, log_dir, auto_flush: bool = True
+    ) -> flax_tb.SummaryWriter:
+        if self._use_null:
+            return typing.cast(flax_tb.SummaryWriter, NullSummaryWriter())
+        elif self._use_threaded_writer:
+            return ThreadedSummaryWriter.open(log_dir, auto_flush=auto_flush)
+        else:
+            return flax_tb.SummaryWriter(log_dir, auto_flush=auto_flush)
 
     def subwriter(self, key: str) -> flax_tb.SummaryWriter:
         """Returns summary writer corresponding to the specific key.
@@ -156,14 +262,10 @@ class MultiDirectorySummaryWriter(flax_tb.SummaryWriter):
         """
         if key not in self._writers:
             if self._allow_new_keys:
-                if self._use_null:
-                    writer = typing.cast(flax_tb.SummaryWriter, NullSummaryWriter())
-                else:
-                    writer = flax_tb.SummaryWriter(
-                        self._log_dir_root / self._dirname_fn(key),
-                        auto_flush=self._auto_flush,
-                    )
-                self._writers[key] = writer
+                self._writers[key] = self._make_subwriter(
+                    self._log_dir_root / self._dirname_fn(key),
+                    auto_flush=self._auto_flush,
+                )
             else:
                 raise ValueError(
                     "Subwriter for `MultiDirectorySummaryWriter` with "
