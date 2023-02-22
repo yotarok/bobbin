@@ -291,6 +291,7 @@ class CtcAsrTask(bobbin.TrainTask):
         model: nn.Module,
         learn_rate_fn: optax.Schedule,
         example_shape: Sequence[int],
+        enable_loss_aux_out: bool = True,
     ):
         example_args = (
             jnp.zeros((1, *example_shape), dtype=np.int16),
@@ -313,12 +314,14 @@ class CtcAsrTask(bobbin.TrainTask):
         # rates to TensorBoard.
         self._learn_rate_fn = learn_rate_fn
 
+        self._enable_loss_aux_out = enable_loss_aux_out
+
     # `bobbin.TrainTask.compute_loss` is the central part of the training.
     # This method must be overridden to define how to compute the loss function
     # from the given parameters and the input batch.
     def compute_loss(
         self, params, batch, *, extra_vars, prng_key, step
-    ) -> Tuple[chex.Scalar, Tuple[VarCollection, LossAuxOut]]:
+    ) -> Tuple[chex.Scalar, Tuple[VarCollection, Optional[LossAuxOut]]]:
         # Prepare model variables for loss computation as we did in MNIST
         # example.
         model_vars = extra_vars.copy()
@@ -357,14 +360,15 @@ class CtcAsrTask(bobbin.TrainTask):
 
         updated_vars = updated_vars.copy(dict(tensorboard=tb_vars))
 
-        return loss, (
-            updated_vars,
-            LossAuxOut(
+        loss_aux_out = None
+        if self._enable_loss_aux_out:
+            loss_aux_out = LossAuxOut(
                 logits=logits,
                 logit_paddings=logit_paddings,
                 per_sample_loss=per_sample_loss,
-            ),
-        )
+            )
+
+        return loss, (updated_vars, loss_aux_out)
 
 
 # Here we define two utility functions for publishing error informations.
@@ -768,7 +772,8 @@ class Configurator:
         block_cfg.kernel_size = 32
         block_cfg.mhsa_attention_dropout_prob = 0.1
 
-        block_cfg.skip_final_ln = True  # Skip final LN
+        block_cfg.skip_final_ln = True  # required for stable optimization.
+        task_cfg.enable_loss_aux_out = False  # This can save device memory.
 
         task_cfg.model.encoder.conformer_blocks = tuple(
             copy.deepcopy(block_cfg) for unused_d in range(17)
