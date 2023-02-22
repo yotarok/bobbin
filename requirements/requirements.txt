@@ -1,6 +1,7 @@
 etils
 flax>=0.6.3
-jax>=0.3.16
+# 0.4.1 is the first version after jax.Array migration.
+jax>=0.4.1
 matplotlib
 numpy>=1.18.0
 tensorflow
