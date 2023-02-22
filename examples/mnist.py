@@ -384,7 +384,7 @@ def main(args: argparse.Namespace):
 
     # First, we publish meta-training information to TensorBoard using
     # `bobbin.publish_trainer_env_info`.
-    train_writer = flax_tb.SummaryWriter(tensorboard_path / "train")
+    train_writer = bobbin.ThreadedSummaryWriter.open(tensorboard_path / "train")
     bobbin.publish_trainer_env_info(train_writer, train_state)
 
     # Then, create and compile the training step function by calling

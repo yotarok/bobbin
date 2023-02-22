@@ -64,7 +64,9 @@ TensorBoard
     NullSummaryWriter
     ImageSummary
     MplImageSummary
+    MultiDirectorySummaryWriter
     ScalarSummary
+    ThreadedSummaryWriter
     publish_train_intermediates
     publish_trainer_env_info
 
@@ -72,6 +74,10 @@ Summary writers
 ~~~~~~~~~~~~~~~
 
 .. autoclass:: NullSummaryWriter
+
+.. autoclass:: MultiDirectorySummaryWriter
+
+.. autoclass:: ThreadedSummaryWriter
 
 Summary variable wrappers
 ~~~~~~~~~~~~~~~~~~~~~~~~~

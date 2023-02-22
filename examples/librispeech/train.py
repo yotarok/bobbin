@@ -876,7 +876,7 @@ def main(args: argparse.Namespace):
     prng_key = jax.random.PRNGKey(jax.process_index() + 3)
 
     train_writer = (
-        flax_tb.SummaryWriter(tensorboard_path / "train")
+        bobbin.ThreadedSummaryWriter.open(tensorboard_path / "train")
         if jax.process_index() == 0
         else bobbin.NullSummaryWriter()
     )

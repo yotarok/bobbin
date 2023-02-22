@@ -17,9 +17,12 @@
 from unittest import mock
 
 from absl.testing import absltest
+from absl.testing import parameterized
 import chex
 import flax
 from flax.metrics import tensorboard as flax_tb
+import jax
+import jax.numpy as jnp
 import numpy as np
 import optax
 
@@ -110,7 +113,7 @@ class EvalResultsPublisherTest(chex.TestCase):
     def test_eval_results_writer(self):
         state = _create_empty_state(step=123)
         writer = tensorboard.MultiDirectorySummaryWriter(
-            "/dummy/root_dir", keys=("devset", "evalset")
+            "/dummy/root_dir", keys=("devset", "evalset"), use_threaded_writer=False
         )
         writer_fn = writer.as_result_processor()
         EvalResults.write_to_tensorboard = mock.MagicMock()
@@ -149,7 +152,9 @@ class EvalResultsPublisherTest(chex.TestCase):
         state = _create_empty_state(step=123)
         custom_write_to_tensorboard = mock.MagicMock()
         writer = tensorboard.MultiDirectorySummaryWriter(
-            "/dummy/root_dir", keys=("devset", "evalset")
+            "/dummy/root_dir",
+            keys=("devset", "evalset"),
+            use_threaded_writer=False,
         )
         writer_fn = writer.as_result_processor(method=custom_write_to_tensorboard)
         writer_fn(
@@ -181,7 +186,7 @@ class EvalResultsPublisherTest(chex.TestCase):
         process_index_mock.return_value = 1
         process_count_mock.return_value = 4
         writer = tensorboard.MultiDirectorySummaryWriter(
-            "/dummy/root_dir", keys=("devset", "evalset")
+            "/dummy/root_dir", keys=("devset", "evalset"), use_threaded_writer=False
         )
         writer_fn = writer.as_result_processor(method=custom_write_to_tensorboard)
         writer_fn(random_test_data, state)
@@ -194,7 +199,7 @@ class EvalResultsPublisherTest(chex.TestCase):
         process_index_mock.return_value = 0
         process_count_mock.return_value = 4
         writer = tensorboard.MultiDirectorySummaryWriter(
-            "/dummy/root_dir", keys=("devset", "evalset")
+            "/dummy/root_dir", keys=("devset", "evalset"), use_threaded_writer=False
         )
         writer_fn = writer.as_result_processor(method=custom_write_to_tensorboard)
         writer_fn(random_test_data, state)
@@ -223,7 +228,7 @@ class EvalResultsPublisherTest(chex.TestCase):
         # This is in fact an unexported/ unused feature, but developed for
         # cleaner API.
         writer = tensorboard.MultiDirectorySummaryWriter(
-            "/dummy/root_dir", keys=("sub1", "sub2")
+            "/dummy/root_dir", keys=("sub1", "sub2"), use_threaded_writer=False
         )
 
         # pytype: disable=attribute-error
@@ -327,6 +332,35 @@ class TrainerEnvPublisherTest(chex.TestCase):
             s = s % tuple(format_args)
             all_log_text += s + "\n"
         np.testing.assert_(bobbin.summarize_shape(params) in all_log_text)
+
+
+class ThreadedSummaryWriterTest(chex.TestCase):
+    @parameterized.named_parameters(
+        ("scalar", "scalar", ("tag", 1.23, jnp.asarray(123))),
+        ("image", "image", ("tag", np.random.uniform((6, 6, 3)), 123)),
+        ("audio", "audio", ("tag", jnp.asarray(np.random.uniform((123,))), 23)),
+        ("histogram", "histogram", ("tag", np.random.uniform((5,)), 234)),
+        ("text", "text", ("texttag", "hello", 123)),
+        ("write", "write", ("any", np.array([1, 2]), 1)),
+        ("hparams", "hparams", (dict(x=3, y=4),)),
+    )
+    def test_eventual_write(self, method_name, test_args):
+        base_writer = _create_mock_writer("dest")
+        writer = bobbin.ThreadedSummaryWriter(base_writer, wait_on_flush=True)
+
+        method = getattr(writer, method_name)
+        method(*test_args)
+        writer.flush()
+
+        base_writer.flush.assert_called_once()
+
+        wrapped_method = getattr(base_writer, method_name)
+        wrapped_method.assert_called_once()
+        passed_args = wrapped_method.call_args.args[: len(test_args)]
+        np.testing.assert_equal(passed_args, test_args)
+        for arg in passed_args:
+            # Make sure arguments are not a Jax Array (that can be on device).
+            np.testing.assert_(not isinstance(arg, jax.Array))
 
 
 if __name__ == "__main__":
