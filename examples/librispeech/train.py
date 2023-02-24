@@ -57,6 +57,7 @@ from bobbin.example_lib import asrnn
 
 Array = chex.Array
 Batch = bobbin.Batch
+Parameter = bobbin.Parameter
 VarCollection = bobbin.VarCollection
 
 
@@ -693,6 +694,13 @@ def _is_running_on_cloud_tpu_vm() -> bool:
     return os.environ.get("CLOUDSDK_PYTHON", None) is not None and libtpu_found
 
 
+def _select_linear_kernel_variables(params: Parameter) -> chex.ArrayTree:
+    """Returns a mask that is active for variables with name 'kernel'."""
+    return jax.tree_util.tree_map(
+        lambda p: p.endswith("kernel"), bobbin.var_util.nested_vars_to_paths(params)
+    )
+
+
 # This example program supports multiple model configuration other than
 # "default" (that is a small model for debugging purpose). Here, we define
 # a set of configuration functions.
@@ -716,6 +724,7 @@ class Configurator:
             asrnn.adamw_with_clipping, learn_rate_cfg, weight_decay=1e-6
         )
         opt_cfg = fdl.Config(Optimizer, tx=tx_cfg, learn_rate=learn_rate_cfg)
+        opt_cfg.tx.mask = _select_linear_kernel_variables
 
         default_depth = 4
         model_cfg = fdl.Config(
