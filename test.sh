@@ -32,6 +32,13 @@ flake8 --ignore=E203,W503 --max-line-length=88 bobbin examples tests
 ## type checking
 pytype --config=pytype.toml
 
+for pyifile in $(find .pytype -name \*.pyi) ; do
+  if [[ $(cat ${pyifile} | grep "Caught error in pytype") ]] ; then
+    echo "found error in $pyifile"
+    exit -1
+  fi
+done
+
 ## tests
 PYTHONPATH=. pytest -n auto tests
 

@@ -22,7 +22,7 @@ import argparse
 import functools
 import logging
 import sys
-from typing import Dict, Optional, Sequence, Tuple
+from typing import Any, Dict, Optional, Sequence, Tuple, TYPE_CHECKING
 
 import chex
 from etils import epath
@@ -39,6 +39,8 @@ import tensorflow_datasets as tfds
 
 import bobbin
 
+if TYPE_CHECKING:
+    nn = Any  # noqa: F811
 
 # `bobbin.VarCollection` is actually `Dict[str, chex.ArrayTree]`. This is a
 # standard structure for storing model variables in Flax.  For example,
@@ -417,7 +419,9 @@ def main(args: argparse.Namespace):
     crontab.schedule(
         evaler.make_cron_action(
             eval_batch_gens, tensorboard_root_path=tensorboard_path
-        ).keep_best_checkpoint("dev", best_checkpoint_path),
+        ).keep_best_checkpoint(  # pytype: disable=attribute-error
+            "dev", best_checkpoint_path
+        ),
         step_interval=1000,
         at_step=warmup,
     )

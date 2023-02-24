@@ -17,7 +17,7 @@ intended to be in "bobbin" core modules.  But, still it's better to have
 it tested.
 """
 
-from typing import Tuple
+from typing import Any, Tuple, TYPE_CHECKING
 import unittest
 
 from absl.testing import absltest
@@ -29,6 +29,10 @@ import flax.linen as nn
 import jax
 import numpy as np
 import optax
+
+
+if TYPE_CHECKING:
+    nn = Any  # noqa: F811
 
 
 def _random_right_paddings(batch_size: int, max_length: int, *, min_length: int = 0):
