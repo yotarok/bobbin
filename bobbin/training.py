@@ -20,7 +20,18 @@ from __future__ import annotations
 import dataclasses
 import functools
 import os
-from typing import Any, Callable, Dict, Iterable, List, Mapping, Optional, Tuple, Union
+from typing import (
+    Any,
+    Callable,
+    Dict,
+    Iterable,
+    List,
+    Mapping,
+    Optional,
+    Tuple,
+    TYPE_CHECKING,
+    Union,
+)
 
 import chex
 from flax import linen as nn
@@ -48,6 +59,10 @@ Action = Callable
 ArrayTree = chex.ArrayTree
 Scalar = chex.Scalar
 PRNGKey = chex.PRNGKey
+
+
+if TYPE_CHECKING:
+    nn = Any  # noqa: F811
 
 
 class TrainState(flax.training.train_state.TrainState):

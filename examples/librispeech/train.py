@@ -34,7 +34,7 @@ import os
 import sys
 import tempfile
 import time
-from typing import Any, Dict, Iterable, Optional, Sequence, Tuple
+from typing import Any, Dict, Iterable, Optional, Sequence, Tuple, TYPE_CHECKING
 import urllib.request
 
 import chex
@@ -60,6 +60,9 @@ Batch = bobbin.Batch
 Parameter = bobbin.Parameter
 VarCollection = bobbin.VarCollection
 
+
+if TYPE_CHECKING:
+    nn = Any  # noqa: F811
 
 # Similar to the MNIST example, the first part of this script is about data
 # and resource . You can skip most of them; however, there's an important step
@@ -709,7 +712,7 @@ _OptimizerAndTaskConfig = Tuple[fdl.Config[Optimizer], fdl.Config[CtcAsrTask]]
 
 @dataclasses.dataclass
 class Configurator:
-    speech_shape: Tuple[int, ...]
+    speech_shape: Sequence[int]
     vocab_size: int
     feature_normalizer: asrio.MeanVarNormalizer
 
@@ -918,7 +921,7 @@ def main(args: argparse.Namespace):
     crontab.schedule(
         evaler.make_cron_action(
             eval_batch_gens, tensorboard_root_path=tensorboard_path
-        ).keep_best_checkpoint(
+        ).keep_best_checkpoint(  # pytype: disable=attribute-error
             "dev",
             best_checkpoint_path,
         ),

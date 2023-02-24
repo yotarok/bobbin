@@ -17,7 +17,16 @@ Linen modules for ASR
 
 from __future__ import annotations
 
-from typing import Any, Callable, Iterable, Optional, Sequence, Tuple, Union
+from typing import (
+    Any,
+    Callable,
+    Iterable,
+    Optional,
+    Sequence,
+    Tuple,
+    TYPE_CHECKING,
+    Union,
+)
 
 import chex
 import flax.linen as nn
@@ -30,6 +39,10 @@ from bobbin.example_lib import asrio
 
 Array = chex.Array
 InitializerFn = Callable[[chex.PRNGKey, chex.Shape, chex.ArrayDType], Array]
+
+if TYPE_CHECKING:
+    nn = Any  # noqa: F811
+
 
 # Following the default initializer in `flax.linen.linear`.
 default_kernel_init = nn.initializers.lecun_normal()

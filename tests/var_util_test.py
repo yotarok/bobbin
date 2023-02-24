@@ -16,7 +16,7 @@
 
 import json
 import tempfile
-from typing import Any, Optional
+from typing import Any, Optional, TYPE_CHECKING
 
 from absl.testing import absltest
 import chex
@@ -32,6 +32,10 @@ from bobbin import training
 from bobbin import var_util
 
 _FrozenDict = flax.core.FrozenDict
+
+
+if TYPE_CHECKING:
+    nn = Any  # noqa: F811
 
 
 class _Pair(flax.struct.PyTreeNode):
