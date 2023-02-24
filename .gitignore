@@ -3,3 +3,4 @@ devenv
 build
 *.egg-info
 _build
+dist
