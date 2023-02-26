@@ -729,6 +729,8 @@ class Configurator:
         opt_cfg = fdl.Config(Optimizer, tx=tx_cfg, learn_rate=learn_rate_cfg)
         opt_cfg.tx.mask = _select_linear_kernel_variables
 
+        kernel_init = nn.initializers.xavier_uniform()
+
         default_depth = 4
         model_cfg = fdl.Config(
             CtcAsrModel,
@@ -736,14 +738,20 @@ class Configurator:
             frontend=fdl.Config(asrnn.LogMelFilterBank),
             encoder=fdl.Config(
                 asrnn.CnnConformerEncoder,
-                cnn=fdl.Config(asrnn.CnnEncoder),
+                cnn=fdl.Config(asrnn.CnnEncoder, default_kernel_init=kernel_init),
                 conformer_blocks=tuple(
-                    fdl.Config(asrnn.ConformerBlock)
+                    fdl.Config(
+                        asrnn.ConformerBlock,
+                        default_kernel_init=kernel_init,
+                    )
                     for unused_depth in range(default_depth)
                 ),
+                output_kernel_init=kernel_init,
             ),
             specaug=fdl.Config(asrnn.SpecAug),
-            classifier=fdl.Config(nn.Dense, features=self.vocab_size),
+            classifier=fdl.Config(
+                nn.Dense, features=self.vocab_size, kernel_init=kernel_init
+            ),
         )
         task_cfg = fdl.Config(
             CtcAsrTask, model_cfg, opt_cfg.learn_rate, self.speech_shape

@@ -44,8 +44,9 @@ if TYPE_CHECKING:
     nn = Any  # noqa: F811
 
 
-# Following the default initializer in `flax.linen.linear`.
-default_kernel_init = nn.initializers.lecun_normal()
+# Following the default initializer in `flax.linen.linear`; however, for the
+# most of modules defined in this module, `xavier-uniform` works better.
+_default_kernel_init = nn.initializers.lecun_normal()
 
 
 def _input_padding_validation(funcname: str, x: Array, x_paddings: Array) -> Tuple[int]:
@@ -196,10 +197,12 @@ class CnnEncoder(nn.Module):
     batch_norm_axis_name: Optional[str] = "batch"
     is_eval: Optional[bool] = None
 
-    kernel_init: InitializerFn = default_kernel_init
-    bias_init: InitializerFn = nn.initializers.zeros_init()
+    default_kernel_init: InitializerFn = _default_kernel_init
 
-    output_kernel_init: InitializerFn = default_kernel_init
+    conv_kernel_init: Optional[InitializerFn] = None
+    conv_bias_init: InitializerFn = nn.initializers.zeros_init()
+
+    output_kernel_init: Optional[InitializerFn] = None
     output_bias_init: InitializerFn = nn.initializers.zeros_init()
 
     @nn.compact
@@ -212,6 +215,10 @@ class CnnEncoder(nn.Module):
         batch_norm_axis_name: Optional[str] = None,
     ) -> Tuple[Array, Array]:
         _input_padding_validation("CnnEncoder", features, feature_paddings)
+
+        conv_kernel_init = self.conv_kernel_init or self.default_kernel_init
+        output_kernel_init = self.output_kernel_init or self.default_kernel_init
+
         is_eval = nn.merge_param("is_eval", self.is_eval, is_eval)
         if self.use_batch_norm:
             batch_norm_axis_name = batch_norm_axis_name or self.batch_norm_axis_name
@@ -235,8 +242,8 @@ class CnnEncoder(nn.Module):
                 strides=strides,
                 use_bias=self.use_bias,
                 padding="SAME",
-                kernel_init=self.kernel_init,
-                bias_init=self.bias_init,
+                kernel_init=conv_kernel_init,
+                bias_init=self.conv_bias_init,
             )(x)
             pad = jax.lax.reduce_window(
                 pad,
@@ -256,7 +263,7 @@ class CnnEncoder(nn.Module):
         x = x.reshape(pad.shape + (-1,))
         x = nn.Dense(
             features=self.num_outputs,
-            kernel_init=self.output_kernel_init,
+            kernel_init=output_kernel_init,
             bias_init=self.output_bias_init,
         )(x)
         return x, pad
@@ -277,10 +284,10 @@ class ConformerConvBlock(nn.Module):
     use_conv_bias: bool = False
     deterministic: Optional[bool] = None
     batch_norm_axis_name: Optional[str] = "batch"
-    pre_conv_kernel_init: InitializerFn = default_kernel_init
+    pre_conv_kernel_init: InitializerFn = _default_kernel_init
     pre_conv_bias_init: InitializerFn = nn.initializers.zeros_init()
-    conv_kernel_init: InitializerFn = default_kernel_init
-    post_conv_kernel_init: InitializerFn = default_kernel_init
+    conv_kernel_init: InitializerFn = _default_kernel_init
+    post_conv_kernel_init: InitializerFn = _default_kernel_init
     post_conv_bias_init: InitializerFn = nn.initializers.zeros_init()
 
     @nn.compact
@@ -344,6 +351,8 @@ class ConformerFfnBlock(nn.Module):
       residual_weight: Coeffcieint multiplied to the non-linear path when it is merged
         with the skip path.
       deterministic: If True, all dropout components are disabled.
+      kernel_init: initializer for the kernel parameteres.
+      bias_init: initializer for the bias parameters.
     """
 
     hidden_dims: int = 1024
@@ -351,7 +360,7 @@ class ConformerFfnBlock(nn.Module):
     residual_dropout_prob: float = 0.0
     residual_weight: float = 0.5
     deterministic: Optional[bool] = None
-    kernel_init: InitializerFn = default_kernel_init
+    kernel_init: InitializerFn = _default_kernel_init
     bias_init: InitializerFn = nn.initializers.zeros_init()
 
     @nn.compact
@@ -400,7 +409,7 @@ class ConformerMhsaBlock(nn.Module):
     use_query_scaler: bool = True
     query_scale_init: InitializerFn = nn.initializers.zeros_init()
 
-    kernel_init: InitializerFn = default_kernel_init
+    kernel_init: InitializerFn = _default_kernel_init
     bias_init: InitializerFn = nn.initializers.zeros_init()
 
     def _attention_fn(
@@ -516,12 +525,31 @@ class ConformerBlock(nn.Module):
     skip_tail_ffn: bool = False
     skip_final_ln: bool = False
 
+    default_kernel_init: Optional[InitializerFn] = _default_kernel_init
+    head_ffn_kernel_init: Optional[InitializerFn] = None
+    mhsa_kernel_init: Optional[InitializerFn] = None
+    lconv_pre_conv_kernel_init: Optional[InitializerFn] = None
+    lconv_conv_kernel_init: Optional[InitializerFn] = None
+    lconv_post_conv_kernel_init: Optional[InitializerFn] = None
+    tail_ffn_kernel_init: Optional[InitializerFn] = None
+
     @nn.compact
     def __call__(
         self, x: Array, x_paddings: Array, is_eval: Optional[bool] = None
     ) -> Tuple[Array, Array]:
         _input_padding_validation("ConformerBlock", x, x_paddings)
         is_eval = nn.merge_param("is_eval", is_eval, self.is_eval)
+
+        head_ffn_kernel_init = self.head_ffn_kernel_init or self.default_kernel_init
+        mhsa_kernel_init = self.mhsa_kernel_init or self.default_kernel_init
+        lconv_pre_conv_kernel_init = (
+            self.lconv_pre_conv_kernel_init or self.default_kernel_init
+        )
+        lconv_conv_kernel_init = self.lconv_conv_kernel_init or self.default_kernel_init
+        lconv_post_conv_kernel_init = (
+            self.lconv_post_conv_kernel_init or self.default_kernel_init
+        )
+        tail_ffn_kernel_init = self.tail_ffn_kernel_init or self.default_kernel_init
 
         *unused_batch_sizes, unused_time_stesps, model_dims = x.shape
 
@@ -530,17 +558,22 @@ class ConformerBlock(nn.Module):
                 hidden_dims=int(model_dims * self.ffn_width_multiplier),
                 hidden_dropout_prob=self.ffn_hidden_dropout_prob,
                 residual_dropout_prob=self.ffn_residual_dropout_prob,
+                kernel_init=head_ffn_kernel_init,
             )(x, deterministic=is_eval)
 
         if not self.skip_mhsa:
             x = ConformerMhsaBlock(
                 residual_dropout_prob=self.mhsa_residual_dropout_prob,
                 attention_dropout_prob=self.mhsa_attention_dropout_prob,
+                kernel_init=mhsa_kernel_init,
             )(x, x_paddings, deterministic=is_eval)
 
         if not self.skip_lconv:
             x = ConformerConvBlock(
                 kernel_size=self.kernel_size,
+                pre_conv_kernel_init=lconv_pre_conv_kernel_init,
+                conv_kernel_init=lconv_conv_kernel_init,
+                post_conv_kernel_init=lconv_post_conv_kernel_init,
                 residual_dropout_prob=self.conv_residual_dropout_prob,
             )(x, x_paddings, deterministic=is_eval)
 
@@ -549,6 +582,7 @@ class ConformerBlock(nn.Module):
                 hidden_dims=int(model_dims * self.ffn_width_multiplier),
                 hidden_dropout_prob=self.ffn_hidden_dropout_prob,
                 residual_dropout_prob=self.ffn_residual_dropout_prob,
+                kernel_init=tail_ffn_kernel_init,
             )(x, deterministic=is_eval)
 
         if not self.skip_final_ln:
@@ -683,7 +717,7 @@ class CnnConformerEncoder(nn.Module):
     is_eval: Optional[bool] = None
     use_fixed_pos_emb: bool = True
 
-    output_kernel_init: InitializerFn = default_kernel_init
+    output_kernel_init: Optional[InitializerFn] = _default_kernel_init
     output_bias_init: InitializerFn = nn.initializers.zeros_init()
 
     @nn.compact
