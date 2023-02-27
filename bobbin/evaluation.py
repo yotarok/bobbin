@@ -241,7 +241,7 @@ class EvalTask:
         self,
         batch_gens: Mapping[str, BatchGen],
         *,
-        tensorboard_root_path: Union[None, str, os.PathLike[str]],
+        tensorboard_root_path: Union[None, str, os.PathLike[str]] = None,
     ) -> Action:
         """Make cron action function for running the evaluation."""
         return RunEval(self, batch_gens, tensorboard_root_path=tensorboard_root_path)
