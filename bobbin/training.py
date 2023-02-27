@@ -298,17 +298,27 @@ class BaseTrainTask:
         if logger is None:
             logger = logging.root
 
-        return functools.partial(
-            self.write_trainer_log, logger=logger, loglevel=loglevel
-        )
+        def write(train_state, *, step_info=None, **unused_kwargs):
+            self.write_trainer_log(
+                train_state, step_info=step_info, logger=logger, loglevel=loglevel
+            )
 
-    def make_checkpoint_saver(self, checkpoint_path: str):
+        return write
+
+    def make_checkpoint_saver(
+        self, checkpoint_path: str, save_args: Optional[Mapping[str, Any]] = None
+    ):
         """Makes an action that saves checkpoint in the specified path."""
+
+        if save_args is None:
+            save_args = dict()
 
         # In future, this save can be overridable for supporting task-specific
         # checkpointing configuration.
         def save(train_state: TrainState, **unused_kwargs):
-            checkpoints.save_checkpoint(checkpoint_path, train_state, train_state.step)
+            checkpoints.save_checkpoint(
+                checkpoint_path, train_state, train_state.step, **save_args
+            )
 
         return save
 
