@@ -22,7 +22,6 @@ import chex
 import flax
 from flax.metrics import tensorboard as flax_tb
 import jax
-import jax.numpy as jnp
 import numpy as np
 import optax
 
@@ -336,9 +335,9 @@ class TrainerEnvPublisherTest(chex.TestCase):
 
 class ThreadedSummaryWriterTest(chex.TestCase):
     @parameterized.named_parameters(
-        ("scalar", "scalar", ("tag", 1.23, jnp.asarray(123))),
+        ("scalar", "scalar", ("tag", 1.23, np.asarray(123))),
         ("image", "image", ("tag", np.random.uniform((6, 6, 3)), 123)),
-        ("audio", "audio", ("tag", jnp.asarray(np.random.uniform((123,))), 23)),
+        ("audio", "audio", ("tag", np.random.uniform((123,)), 23)),
         ("histogram", "histogram", ("tag", np.random.uniform((5,)), 234)),
         ("text", "text", ("texttag", "hello", 123)),
         ("write", "write", ("any", np.array([1, 2]), 1)),
