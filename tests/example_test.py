@@ -25,6 +25,8 @@ import unittest
 import sys
 
 from absl.testing import absltest
+from absl.testing import parameterized
+import chex
 from etils import epath
 import numpy as np
 import tensorflow as tf
@@ -105,7 +107,7 @@ def _mocked_librispeech(size: int = 128) -> tf.data.Dataset:
     )
 
 
-class MnistExampleTest(absltest.TestCase):
+class MnistExampleTest(chex.TestCase):
     def test_invoke(self):
         sys.path.append(str(_EXAMPLES_DIR))
         sys.modules["tensorflow_datasets"] = MockedTfds(
@@ -128,7 +130,7 @@ class MnistExampleTest(absltest.TestCase):
             np.testing.assert_((args.log_dir_path / "best_ckpts").is_dir())
 
 
-class LibriSpeechExampleTest(absltest.TestCase):
+class LibriSpeechExampleTest(chex.TestCase):
     def test_invoke(self):
         sys.path.append(str(_EXAMPLES_DIR))
         sys.modules["tensorflow_datasets"] = MockedTfds(
@@ -149,6 +151,33 @@ class LibriSpeechExampleTest(absltest.TestCase):
             args.accumulate_updates = 2
             args.multi_process = None
             args.model_type = "unittest"
+
+            librispeech.train.main(args)
+
+    @parameterized.product(
+        model_type=("debug", "unittest", "p100m", "p100m_preln"),
+        use_accumulate_updates=(False, True),
+    )
+    def test_configuration(self, model_type, use_accumulate_updates):
+        sys.path.append(str(_EXAMPLES_DIR))
+        sys.modules["tensorflow_datasets"] = MockedTfds(
+            load_return_values={"": _mocked_librispeech()}
+        )
+        import librispeech.train  # pytype: disable=import-error
+
+        with tempfile.TemporaryDirectory() as logdir:
+            args = argparse.Namespace()
+            args.log_dir_path = epath.Path(logdir)
+            args.max_steps = 0
+
+            args.tfds_data_dir = None
+            args.feature_normalizer = None
+            args.per_device_batch_size = 1
+            args.wpm_vocab = None
+            args.wpm_size_limit = 32
+            args.accumulate_updates = 2 if use_accumulate_updates else None
+            args.multi_process = None
+            args.model_type = model_type
 
             librispeech.train.main(args)
 

@@ -30,6 +30,7 @@ black --check bobbin examples tests
 flake8 --ignore=E203,W503 --max-line-length=88 bobbin examples tests
 
 ## type checking
+rm -rf .pytype
 pytype --config=pytype.toml
 
 for pyifile in $(find .pytype -name \*.pyi) ; do

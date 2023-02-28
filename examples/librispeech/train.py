@@ -704,30 +704,46 @@ def _select_linear_kernel_variables(params: Parameter) -> chex.ArrayTree:
     )
 
 
+@dataclasses.dataclass
+class TrainerSettings:
+    """All hyper-parameters in this example."""
+
+    opt: Optimizer
+    task: CtcAsrTask
+
+
+_TrainerConfig = fdl.Config[TrainerSettings]
+
+
+_registered_configs = []
+
+
+def _register_config(f):
+    _registered_configs.append(f.__name__)
+    return f
+
+
 # This example program supports multiple model configuration other than
 # "default" (that is a small model for debugging purpose). Here, we define
 # a set of configuration functions.
-_OptimizerAndTaskConfig = Tuple[fdl.Config[Optimizer], fdl.Config[CtcAsrTask]]
-
-
 @dataclasses.dataclass
 class Configurator:
     speech_shape: Sequence[int]
     vocab_size: int
     feature_normalizer: asrio.MeanVarNormalizer
 
-    @classmethod
-    def supported_config_names(cls):
-        return ["default", "unittest", "p100m_preln", "debug"]
-
-    def debug(self) -> _OptimizerAndTaskConfig:
+    @_register_config
+    def debug(self) -> _TrainerConfig:
         """A model for debugging consisting of 4 layers of 256-dim Conformers."""
         learn_rate_cfg = fdl.Config(transformer_schedule)
-        tx_cfg = fdl.Config(
-            asrnn.adamw_with_clipping, learn_rate_cfg, weight_decay=1e-6
+
+        ret = fdl.Config(TrainerSettings)
+        ret.opt = fdl.Config(
+            Optimizer,
+            tx=fdl.Config(asrnn.adamw_with_clipping, learn_rate_cfg, weight_decay=1e-6),
+            learn_rate=learn_rate_cfg,
         )
-        opt_cfg = fdl.Config(Optimizer, tx=tx_cfg, learn_rate=learn_rate_cfg)
-        opt_cfg.tx.mask = _select_linear_kernel_variables
+        ret.opt.tx.mask = _select_linear_kernel_variables
 
         kernel_init = nn.initializers.xavier_uniform()
 
@@ -753,30 +769,33 @@ class Configurator:
                 nn.Dense, features=self.vocab_size, kernel_init=kernel_init
             ),
         )
-        task_cfg = fdl.Config(
-            CtcAsrTask, model_cfg, opt_cfg.learn_rate, self.speech_shape
+        ret.task = fdl.Config(
+            CtcAsrTask, model_cfg, ret.opt.learn_rate, self.speech_shape
         )
 
-        return opt_cfg, task_cfg
+        return ret
 
-    def default(self) -> _OptimizerAndTaskConfig:
+    @_register_config
+    def default(self) -> _TrainerConfig:
         """Default model, currently "debug"."""
         return self.debug()
 
-    def unittest(self) -> _OptimizerAndTaskConfig:
+    @_register_config
+    def unittest(self) -> _TrainerConfig:
         """Unittest model only for checking if the step function works."""
-        opt_cfg, task_cfg = self.default()
-        task_cfg.model.encoder.cnn.channels = (5, 5)
-        task_cfg.model.encoder.cnn.num_outputs = 16
-        block_cfg = copy.deepcopy(task_cfg.model.encoder.conformer_blocks[0])
+        ret = self.default()
+        ret.task.model.encoder.cnn.channels = (5, 5)
+        ret.task.model.encoder.cnn.num_outputs = 16
+        block_cfg = copy.deepcopy(ret.task.model.encoder.conformer_blocks[0])
         block_cfg.kernel_size = 3
-        task_cfg.model.encoder.conformer_blocks = tuple(
+        ret.task.model.encoder.conformer_blocks = tuple(
             copy.deepcopy(block_cfg) for unused_d in range(2)
         )
-        return opt_cfg, task_cfg
+        return ret
 
-    def p100m_preln(self) -> _OptimizerAndTaskConfig:
-        """100m parameter model.
+    @_register_config
+    def p100m_preln(self) -> _TrainerConfig:
+        """100m parameter model without inter-layer normalization.
 
         This is ConformerL model described in the original paper:
           https://arxiv.org/abs/2005.08100, but without final LayerNorm in
@@ -785,35 +804,42 @@ class Configurator:
         more similar to the PreLN transformer described in:
         https://arxiv.org/abs/2002.04745
         """
-        opt_cfg, task_cfg = self.default()
+        ret = self.p100m()
+        for block_cfg in ret.task.model.encoder.conformer_blocks:
+            block_cfg.skip_final_ln = True
+        return ret
+
+    @_register_config
+    def p100m(self) -> _TrainerConfig:
+        """100m parameter model."""
+        ret = self.default()
+
         model_width = 512
-        task_cfg.model.encoder.cnn.num_outputs = model_width
-        block_cfg = copy.deepcopy(task_cfg.model.encoder.conformer_blocks[0])
+        ret.task.model.encoder.cnn.num_outputs = model_width
+        block_cfg = copy.deepcopy(ret.task.model.encoder.conformer_blocks[0])
         block_cfg.kernel_size = 32
         block_cfg.mhsa_attention_dropout_prob = 0.1
 
-        block_cfg.skip_final_ln = True  # required for stable optimization.
-        task_cfg.enable_loss_aux_out = False  # This can save device memory.
+        ret.task.enable_loss_aux_out = False  # This can save device memory.
 
-        task_cfg.model.encoder.conformer_blocks = tuple(
+        ret.task.model.encoder.conformer_blocks = tuple(
             copy.deepcopy(block_cfg) for unused_d in range(17)
         )
-        task_cfg.model.encoder.num_outputs = model_width
-        opt_cfg.learn_rate.model_dims = model_width
-        opt_cfg.learn_rate.base_learn_rate = 5.0
-        opt_cfg.tx.weight_decay = 0.0
-        opt_cfg.tx.b1 = 0.9
-        opt_cfg.tx.b2 = 0.98
-        opt_cfg.tx.eps = 1e-9
-        opt_cfg.tx.l2_penalty = 1e-6
-        return opt_cfg, task_cfg
+        ret.task.model.encoder.num_outputs = model_width
+        ret.opt.learn_rate.model_dims = model_width
+        ret.opt.learn_rate.base_learn_rate = 5.0
+        ret.opt.tx.weight_decay = 0.0
+        ret.opt.tx.b1 = 0.9
+        ret.opt.tx.b2 = 0.98
+        ret.opt.tx.eps = 1e-9
+        ret.opt.tx.l2_penalty = 1e-6
+        return ret
 
-    def get_config_by_name(self, name: str) -> _OptimizerAndTaskConfig:
+    def get_config_by_name(self, name: str) -> _TrainerConfig:
         config_fn = getattr(self, name.lower(), None)
         if config_fn is None:
             raise ValueError(
-                f"Unsupported model {name}. "
-                f"Supported types = {type(self).supported_config_names()}"
+                f"Unsupported model {name}. Supported {_registered_configs}"
             )
         return config_fn()
 
@@ -864,23 +890,24 @@ def main(args: argparse.Namespace):
                 f.read(), asrio.MeanVarNormalizer.empty()
             )
 
-    opt_cfg, task_cfg = Configurator(
-        speech_shape, len(wpm_vocab), normalizer
-    ).get_config_by_name(args.model_type)
+    config = Configurator(speech_shape, len(wpm_vocab), normalizer).get_config_by_name(
+        args.model_type
+    )
 
     # and thanks to flexibility of Fiddle, it's very easy to attach
     # multi-step update feature (a memory-saving technique that simulates
     # larger-batch training by accumulating updates of smaller batches)
     # after optax is configured.
     if args.accumulate_updates != 1:
-        original_tx = opt_cfg.tx
-        opt_cfg.tx = fdl.Config(
+        original_tx = config.opt.tx
+        config.opt.tx = fdl.Config(
             optax.MultiSteps, original_tx, every_k_schedule=args.accumulate_updates
         )
 
     # Actual optimizer and task are built with `fdl.build` as follows
-    opt = fdl.build(opt_cfg)
-    task = fdl.build(task_cfg)
+    settings = fdl.build(config)
+    opt = settings.opt
+    task = settings.task
 
     # Here, we configure model, optimizer, and tasks.
     evaler = EvalTask(task.model, wpm_vocab)
@@ -908,12 +935,7 @@ def main(args: argparse.Namespace):
     bobbin.publish_trainer_env_info(train_writer, train_state)
     train_writer.text(
         "fiddle_hparams",
-        "```\n" + printing.as_str_flattened(task_cfg) + "\n```",
-        step=0,
-    )
-    train_writer.text(
-        "fiddle_hparams_opt",
-        "```\n" + printing.as_str_flattened(opt_cfg) + "\n```",
+        "```\n" + printing.as_str_flattened(config) + "\n```",
         step=0,
     )
     # Seeting up crontab (auxiliary actions periodically executed during the training)
@@ -1033,7 +1055,7 @@ if __name__ == "__main__":
         "--model_type",
         type=str,
         default="default",
-        choices=Configurator.supported_config_names(),
+        choices=_registered_configs,
         help=("model configuration specifier"),
     )
 
