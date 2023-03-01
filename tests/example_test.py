@@ -22,6 +22,7 @@ import dataclasses
 import tempfile
 from typing import Dict
 import unittest
+import string
 import sys
 
 from absl.testing import absltest
@@ -92,7 +93,7 @@ def _mocked_librispeech(size: int = 128) -> tf.data.Dataset:
                 "id": "mocked_speech_{n:05d}",
                 "speaker_id": n % 5,
                 "speech": speech,
-                "text": "THIS IS {n}-th SENTENCE IN GENERATED DATASET",
+                "text": f"THIS IS {n}-TH SENTENCE IN GENERATED DATASET",
             }
 
     return tf.data.Dataset.from_generator(
@@ -113,41 +114,65 @@ class MnistExampleTest(chex.TestCase):
         sys.modules["tensorflow_datasets"] = MockedTfds(
             load_return_values={"": _mocked_supervised_mnist()}
         )
-        import mnist  # pytype: disable=import-error
 
         with tempfile.TemporaryDirectory() as logdir:
-            args = argparse.Namespace()
-            args.log_dir_path = epath.Path(logdir)
-            args.max_steps = 5
-            mnist.main(args)
+            with chex.fake_pmap_and_jit():
+                import mnist  # pytype: disable=import-error
 
-            tensorboard_path = args.log_dir_path / "tensorboard"
-            np.testing.assert_(tensorboard_path.is_dir())
-            for split in ("train", "dev", "test"):
-                np.testing.assert_((tensorboard_path / split).is_dir())
+                def f():
+                    return mnist.CNNDenseClassifier(
+                        cnn_features=(3, 4),
+                        cnn_pool_strides=((6, 6), (6, 6)),
+                        dense_features=(7,),
+                    )
 
-            np.testing.assert_((args.log_dir_path / "all_ckpts").is_dir())
-            np.testing.assert_((args.log_dir_path / "best_ckpts").is_dir())
+                mnist.make_model = f
+
+                args = argparse.Namespace()
+                args.log_dir_path = epath.Path(logdir)
+                args.max_steps = 10
+                mnist.main(args)
+
+                tensorboard_path = args.log_dir_path / "tensorboard"
+                np.testing.assert_(tensorboard_path.is_dir())
+                for split in ("train", "dev", "test"):
+                    np.testing.assert_((tensorboard_path / split).is_dir())
+
+                np.testing.assert_((args.log_dir_path / "all_ckpts").is_dir())
+                np.testing.assert_((args.log_dir_path / "best_ckpts").is_dir())
 
 
 class LibriSpeechExampleTest(chex.TestCase):
-    def test_invoke(self):
+    def disabled_test_invoke(self):
+        """Test first step of the example script.
+
+        This test is currently disabled as it consumes too much computational
+        resources and anyway is not being well-suited as a "unit"-test.
+        """
+
         sys.path.append(str(_EXAMPLES_DIR))
         sys.modules["tensorflow_datasets"] = MockedTfds(
             load_return_values={"": _mocked_librispeech()}
         )
-        import librispeech.train  # pytype: disable=import-error
 
         with tempfile.TemporaryDirectory() as logdir:
+            wpm_path = epath.Path(logdir) / "wpm.vocab"
+            wpm_vocab = (
+                ["<unk>", "▁"] + list(string.ascii_lowercase) + list(string.digits)
+            )
+            wpm_path.write_text("\n".join(wpm_vocab))
+
+            import librispeech.train  # pytype: disable=import-error
+
             args = argparse.Namespace()
             args.log_dir_path = epath.Path(logdir)
             args.max_steps = 1
 
             args.tfds_data_dir = None
             args.feature_normalizer = None
-            args.per_device_batch_size = 8
-            args.wpm_vocab = None
-            args.wpm_size_limit = 32
+            args.per_device_batch_size = 2
+            args.wpm_vocab = wpm_path
+            args.wpm_size_limit = None
             args.accumulate_updates = 2
             args.multi_process = None
             args.model_type = "unittest"
@@ -163,9 +188,10 @@ class LibriSpeechExampleTest(chex.TestCase):
         sys.modules["tensorflow_datasets"] = MockedTfds(
             load_return_values={"": _mocked_librispeech()}
         )
-        import librispeech.train  # pytype: disable=import-error
 
         with tempfile.TemporaryDirectory() as logdir:
+            import librispeech.train  # pytype: disable=import-error
+
             args = argparse.Namespace()
             args.log_dir_path = epath.Path(logdir)
             args.max_steps = 0
