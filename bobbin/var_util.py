@@ -132,9 +132,14 @@ def read_pytree_json_file(
 
 def total_dimensionality(tree: ArrayTree) -> int:
     """Returns total dimensionality of the variables in the given tree."""
-    return jax.tree_util.tree_reduce(
-        lambda n, arr: n + np.product(np.asarray(arr).shape), tree, 0
-    )
+
+    def reduce(n: int, arr: Array) -> int:
+        if arr is None:  # None is counted as zero
+            return n
+        else:
+            return n + np.product(np.asarray(arr).shape)
+
+    return jax.tree_util.tree_reduce(reduce, tree, 0)
 
 
 def summarize_shape(tree: ArrayTree) -> str:
@@ -149,14 +154,18 @@ def summarize_shape(tree: ArrayTree) -> str:
         for k, v in subtree.items():
             ret += " " * (indent_width * indent_level)
             ret += k + ":"
-            if hasattr(v, "shape") and hasattr(v, "dtype"):
+            if v is None:
+                ret += " None\n"
+            elif hasattr(v, "shape") and hasattr(v, "dtype"):
                 ret += " " + metadata_to_str(v) + "\n"
             else:
                 ret += "\n"
                 ret += visit_node(v, indent_level + 1)
         return ret
 
-    if hasattr(tree, "shape") and hasattr(tree, "dtype"):
+    if tree is None:
+        return "None"
+    elif hasattr(tree, "shape") and hasattr(tree, "dtype"):
         return metadata_to_str(tree)
 
     # normalize
