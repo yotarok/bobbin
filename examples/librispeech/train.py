@@ -784,12 +784,13 @@ class Configurator:
     def unittest(self) -> _TrainerConfig:
         """Unittest model only for checking if the step function works."""
         ret = self.default()
-        ret.task.model.encoder.cnn.channels = (5, 5)
-        ret.task.model.encoder.cnn.num_outputs = 16
+        ret.task.model.encoder.cnn.channels = (3, 3)
+        ret.task.model.encoder.cnn.num_outputs = 8
+        ret.task.model.encoder.num_outputs = 8
         block_cfg = copy.deepcopy(ret.task.model.encoder.conformer_blocks[0])
-        block_cfg.kernel_size = 3
+        block_cfg.kernel_size = 2
         ret.task.model.encoder.conformer_blocks = tuple(
-            copy.deepcopy(block_cfg) for unused_d in range(2)
+            copy.deepcopy(block_cfg) for unused_d in range(1)
         )
         return ret
 
