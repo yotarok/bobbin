@@ -221,6 +221,7 @@ class VarInspectorTest(chex.TestCase):
                 x=[5, np.array([1, 2], dtype=np.float32)],
                 y=np.zeros((3, 3, 2), dtype=np.float64),
             ),
+            elem_none=None,
         )
         np.testing.assert_equal(
             var_util.summarize_shape(var).strip(),
@@ -233,6 +234,7 @@ elem2:
     0: () dtype=int64
     1: (2,) dtype=float32
   y: (3, 3, 2) dtype=float64
+elem_none: None
 """.strip(),
         )
 
