@@ -816,6 +816,7 @@ class Configurator:
 
         model_width = 512
         ret.task.model.encoder.cnn.num_outputs = model_width
+        ret.task.model.encoder.num_outputs = model_width
         block_cfg = copy.deepcopy(ret.task.model.encoder.conformer_blocks[0])
         block_cfg.kernel_size = 32
         block_cfg.mhsa_attention_dropout_prob = 0.1
