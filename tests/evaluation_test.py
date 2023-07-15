@@ -104,8 +104,8 @@ class EvalTaskTest(chex.TestCase):
         def incompatible_evaluate_method(self, batch):
             return jax.tree_util.tree_reduce(lambda acc, x: acc + x.sum(), batch, 0.0)
 
-        SumEvalTask.evaluate = incompatible_evaluate_method
         eval_task = SumEvalTask()
+        eval_task.evaluate = incompatible_evaluate_method
         batches = [
             np.ones((3, 3)) * 0.1,
         ]
