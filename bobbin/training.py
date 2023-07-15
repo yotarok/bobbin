@@ -36,7 +36,6 @@ from typing import (
 import chex
 from flax import linen as nn
 from flax import struct
-from flax.training import checkpoints
 import flax.training.train_state
 import flax.metrics.tensorboard as flax_tb
 import jax
@@ -44,6 +43,7 @@ import jax.numpy as jnp
 import logging
 import numpy as np
 import optax
+import orbax.checkpoint
 import time
 
 from .pmap_util import tpmap
@@ -305,23 +305,6 @@ class BaseTrainTask:
 
         return write
 
-    def make_checkpoint_saver(
-        self, checkpoint_path: str, save_args: Optional[Mapping[str, Any]] = None
-    ):
-        """Makes an action that saves checkpoint in the specified path."""
-
-        if save_args is None:
-            save_args = dict()
-
-        # In future, this save can be overridable for supporting task-specific
-        # checkpointing configuration.
-        def save(train_state: TrainState, **unused_kwargs):
-            checkpoints.save_checkpoint(
-                checkpoint_path, train_state, train_state.step, **save_args
-            )
-
-        return save
-
     def make_training_progress_publisher(
         self,
         writer: flax_tb.SummaryWriter,
@@ -433,7 +416,11 @@ def initialize_train_state(
         extra_vars={k: v for k, v in init_model_vars.items() if k != "params"},
     )
 
-    if checkpoint_path is not None and os.path.exists(checkpoint_path):
-        new_state = checkpoints.restore_checkpoint(checkpoint_path, new_state)
+    if checkpoint_path is not None:
+        cpman = orbax.checkpoint.CheckpointManager(
+            checkpoint_path, orbax.checkpoint.PyTreeCheckpointer()
+        )
+        if (latest := cpman.latest_step()) is not None:
+            new_state = cpman.restore(latest, items=new_state)
 
     return new_state

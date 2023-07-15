@@ -48,6 +48,7 @@ import jax
 import jax.numpy as jnp
 import numpy as np
 import optax
+import orbax
 import tensorflow as tf
 import tensorflow_datasets as tfds
 
@@ -953,20 +954,28 @@ def main(args: argparse.Namespace):
     crontab.schedule(
         evaler.make_cron_action(
             eval_batch_gens, tensorboard_root_path=tensorboard_path
-        ).keep_best_checkpoint(  # pytype: disable=attribute-error
+        ).keep_best_checkpoint(
             "dev",
             best_checkpoint_path,
+            orbax.checkpoint.PyTreeCheckpointer(),
+            orbax.checkpoint.CheckpointManagerOptions(max_to_keep=1),
         ),
         step_interval=eval_freq,
+    )
+    all_saver = orbax.checkpoint.CheckpointManager(
+        all_checkpoint_path,
+        orbax.checkpoint.PyTreeCheckpointer(),
+        orbax.checkpoint.CheckpointManagerOptions(max_to_keep=10),
+    )
+
+    crontab.checkpoint(
+        all_saver,
+        step_interval=1000,
+        at_step=warmup,
     )
     # So, except for evaluation action above, every other action is registered
     # only if `jax.process_index() == 0`.
     if jax.process_index() == 0:
-        crontab.schedule(
-            task.make_checkpoint_saver(all_checkpoint_path),
-            step_interval=1000,
-            at_step=warmup,
-        )
         crontab.schedule(
             task.make_log_writer(), time_interval=30.0, at_first_steps_of_process=warmup
         )

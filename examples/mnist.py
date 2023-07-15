@@ -1,4 +1,4 @@
-# Copyright 2022 Google LLC
+# Copyright 2023 Google LLC
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -34,6 +34,7 @@ import jax
 import jax.numpy as jnp
 import numpy as np
 import optax
+import orbax.checkpoint
 import tensorflow as tf
 import tensorflow_datasets as tfds
 
@@ -42,7 +43,7 @@ import bobbin
 if TYPE_CHECKING:
     nn = Any  # noqa: F811
 
-# `bobbin.VarCollection` is actually `Dict[str, chex.ArrayTree]`. This is a
+# `bobbin.VarCollection` is actually `dict[str, chex.ArrayTree]`. This is a
 # standard structure for storing model variables in Flax.  For example,
 # in typical flax models, `var_collection['params']` is used for storing
 # parameters, and `var_collection['batch_stats']` is used for storing
@@ -358,76 +359,55 @@ def make_model() -> nn.Module:
 
 
 def main(args: argparse.Namespace):
-    # Unlike other frameworks "bobbin" doesn't define your main function, and
-    # designed to make your main function simpler.
-    # (This should also be important for Jupyter notebook experiments.)
-
-    # First, we define some paths.
     all_checkpoint_path = args.log_dir_path / "all_ckpts"
     best_checkpoint_path = args.log_dir_path / "best_ckpts"
     tensorboard_path = args.log_dir_path / "tensorboard"
 
-    # and we define datasets, the model, the optimizer, and the tasks defined
-    # above.
     train_ds, eval_dss = get_datasets(max_train_batches=args.max_steps)
     model = make_model()
     tx = make_tx()
     task = ClassificationTask(model)
     evaler = EvalTask(model)
 
-    # Trainer state variable is first initialized using
-    # `bobbin.TrainTask.initialize_train_state`. This function takes RNG seed,
-    # optimizer, and checkpoint path as arguments. Checkpoint will be loaded if
-    # there's a valid checkpoint in the specified path, otherwise, it will
-    # initialize the variables using the RNG seed provided.
     train_state = task.initialize_train_state(
         jax.random.PRNGKey(0), tx, checkpoint_path=all_checkpoint_path
     )
 
-    # First, we publish meta-training information to TensorBoard using
-    # `bobbin.publish_trainer_env_info`.
     train_writer = bobbin.ThreadedSummaryWriter.open(tensorboard_path / "train")
     bobbin.publish_trainer_env_info(train_writer, train_state)
 
-    # Then, create and compile the training step function by calling
-    # `make_training_step_fn`, and obtain multi-process version of the step
-    # function using `pmap` function.
     train_step_fn = task.make_training_step_fn().pmap("batch")
-    # Since we will be working on pmapped version of training function,
-    # training state must be device-replicated as follows:
     train_state = flax.jax_utils.replicate(train_state, jax.local_devices())
 
-    # bobbin's evaluation functions take a dictionary of generators (functions
-    # that return iterators) as a source of test data.  Here, we convert
-    # `tf.data.Dataset`s to the generators.
     eval_batch_gens = {dsname: ds.as_numpy_iterator for dsname, ds in eval_dss.items()}
 
-    # Finally, we configure `bobbin.CronTab`.
     warmup = 5
     crontab = bobbin.CronTab()
-    # This entry in crontab means that we save checkpoint for train_state for
-    # each 1000 steps and after 5 (warmup) steps completed.
-    crontab.schedule(
-        task.make_checkpoint_saver(all_checkpoint_path),
+
+    all_saver = orbax.checkpoint.CheckpointManager(
+        all_checkpoint_path,
+        orbax.checkpoint.PyTreeCheckpointer(),
+        orbax.checkpoint.CheckpointManagerOptions(max_to_keep=10),
+    )
+    crontab.checkpoint(
+        all_saver,
         step_interval=1000,
         at_step=warmup,
     )
-    # This entry in crontab means that we run evaluation for each 1000 steps and
-    # after 5 (warmup) steps completed.
-    # `EvalResults` will be published to `tensorboard_path`. Also, this keeps
-    # the best performing parameters to a separate checkpoint path.
+
     crontab.schedule(
         evaler.make_cron_action(
             eval_batch_gens, tensorboard_root_path=tensorboard_path
-        ).keep_best_checkpoint(  # pytype: disable=attribute-error
-            "dev", best_checkpoint_path
+        ).keep_best_checkpoint(
+            "dev",
+            best_checkpoint_path,
+            orbax.checkpoint.PyTreeCheckpointer(),
+            orbax.checkpoint.CheckpointManagerOptions(max_to_keep=1),
         ),
         step_interval=1000,
         at_step=warmup,
     )
-    # This entry in crontab means that the log entry will be written for each
-    # approx. 10 seconds, and for first 5 (warmup) steps, log will be written
-    # after every step.
+
     crontab.schedule(
         task.make_log_writer(), time_interval=10.0, at_first_steps_of_process=warmup
     )
@@ -448,6 +428,7 @@ def main(args: argparse.Namespace):
         train_state, step_info = train_step_fn(train_state, batch, rng)
         # and periodical actions registered in crontab will be invoked.
         crontab.run(train_state, step_info=step_info)
+        all
 
 
 if __name__ == "__main__":

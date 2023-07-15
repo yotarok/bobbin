@@ -38,9 +38,9 @@ from etils import epath
 import flax
 from flax import struct
 from flax.metrics import tensorboard as flax_tb
-from flax.training import checkpoints
 import jax
 import numpy as np
+import orbax.checkpoint
 
 from .pmap_util import gather_from_jax_processes
 from .pmap_util import unshard
@@ -155,8 +155,25 @@ class RunEval:
 
         return eval_results
 
-    def keep_best_checkpoint(self, tune_on: str, dest_path: str):
-        return RunEvalKeepBest(self, tune_on, dest_path)
+    def keep_best_checkpoint(
+        self,
+        tune_on: str,
+        checkpoint_dir: epath.PathLike,
+        checkpointer: Union[
+            orbax.checkpoint.AbstractCheckpointer, orbax.checkpoint.CheckpointersDict
+        ],
+        options: Optional[orbax.checkpoint.CheckpointManagerOptions] = None,
+        *checkpoint_manager_args,
+        **checkpoint_manager_kwargs,
+    ) -> RunEvalKeepBest:
+        checkpoint_manager = orbax.checkpoint.CheckpointManager(
+            checkpoint_dir,
+            checkpointer,
+            options=options,
+            *checkpoint_manager_args,
+            **checkpoint_manager_kwargs,
+        )
+        return RunEvalKeepBest(self, tune_on, checkpoint_manager)
 
     def add_result_processor(self, f: EvalResultProcessorFn):
         self._result_processors.append(f)
@@ -185,13 +202,16 @@ class RunEvalKeepBest:
     """Action that runs evaluation and saves the best checkpoint."""
 
     def __init__(
-        self, run_eval_action: Action, tune_on: str, dest_path: Union[str, os.PathLike]
+        self,
+        run_eval_action: Action,
+        tune_on: str,
+        checkpoint_manager: orbax.checkpoint.CheckpointManager,
     ):
         self._run_eval_action = run_eval_action
         self._tune_on = tune_on
-        self._dest_path = epath.Path(dest_path)
         self._current_best = None
-        self._results_path = self._dest_path / "results.json"
+        self._ckpt_manager = checkpoint_manager
+        self._results_path = checkpoint_manager.directory / "results.json"
 
     def __call__(self, train_state, **kwargs):
         eval_results = self._run_eval_action(train_state, **kwargs)
@@ -207,10 +227,8 @@ class RunEvalKeepBest:
         if self._current_best is None or result.is_better_than(self._current_best):
             self._current_best = result
 
+            self._ckpt_manager.save(train_state.step, train_state)
             if jax.process_index() == 0:
-                checkpoints.save_checkpoint(
-                    self._dest_path, train_state, train_state.step, overwrite=True
-                )
                 write_pytree_json_file(self._results_path, result)
             saved_train_state = train_state
         return RunEvalKeepBestResult(
@@ -242,7 +260,7 @@ class EvalTask:
         batch_gens: Mapping[str, BatchGen],
         *,
         tensorboard_root_path: Union[None, str, os.PathLike[str]] = None,
-    ) -> Action:
+    ) -> RunEval:
         """Make cron action function for running the evaluation."""
         return RunEval(self, batch_gens, tensorboard_root_path=tensorboard_root_path)
 

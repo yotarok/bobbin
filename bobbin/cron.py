@@ -32,6 +32,7 @@ from typing import (
 
 import flax
 import flax.training.train_state
+import orbax.checkpoint
 
 TrainState = flax.training.train_state.TrainState
 Action = Callable[..., Optional[Tuple[TrainState, ...]]]
@@ -139,6 +140,16 @@ class CronTab:
 
     def __init__(self):
         self._actions = []
+
+    def checkpoint(
+        self,
+        checkpoint_manager: orbax.checkpoint.CheckpointManager,
+        **kwargs,
+    ) -> CronTab:
+        def invoke_checkpointer(train_state, *args, **kwargs):
+            checkpoint_manager.save(train_state.step, train_state)
+
+        return self.schedule(invoke_checkpointer, **kwargs)
 
     def schedule(
         self,
