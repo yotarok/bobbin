@@ -22,7 +22,6 @@ import chex
 from etils import epath
 import flax
 import jax
-import jax.numpy as jnp
 import numpy as np
 
 
@@ -96,7 +95,7 @@ class _ArrayEncoder(json.JSONEncoder):
     """Internal JSON encoder that supports array encoding."""
 
     def default(self, obj: Any):
-        if isinstance(obj, (np.ndarray, jnp.DeviceArray, jax.Array)):
+        if isinstance(obj, (np.ndarray, jax.Array)):
             if obj.shape == ():
                 # Scalar is serialized as normal scalar
                 return obj.tolist()
