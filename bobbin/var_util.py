@@ -136,7 +136,7 @@ def total_dimensionality(tree: ArrayTree) -> int:
         if arr is None:  # None is counted as zero
             return n
         else:
-            return n + np.product(np.asarray(arr).shape)
+            return n + np.prod(np.asarray(arr).shape)
 
     return jax.tree_util.tree_reduce(reduce, tree, 0)
 

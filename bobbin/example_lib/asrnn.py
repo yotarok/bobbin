@@ -660,7 +660,7 @@ class SpecAug(nn.Module):
                 self.freq_mask_count,
                 widths=self.freq_mask_max_bins,
             )
-            mask = jnp.product(mask, axis=-1)[:, np.newaxis, :]
+            mask = jnp.prod(mask, axis=-1)[:, np.newaxis, :]
             mask = mask.reshape(mask.shape + (1,) * len(channels))
             x = x * mask
         if self.time_mask_count > 0:
@@ -678,7 +678,7 @@ class SpecAug(nn.Module):
                 widths=widths,
                 limits=lengths,
             )
-            mask = jnp.product(mask, axis=-1)
+            mask = jnp.prod(mask, axis=-1)
             mask = mask.reshape(mask.shape + (1,) + (1,) * len(channels))
             x = x * mask
         return x
