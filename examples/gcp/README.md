@@ -62,7 +62,7 @@ Then, by running the following command, you have TPU-VM to be setup.
 
 ```
 ansible-playbook ./examples/gcp/tpu_vm.playbook.yml --extra-vars \
-    "zone=ZONE project=PROJECT node_name=bobbin-tpu accelerator_type=TPUTYPE"
+    "zone=ZONE project=PROJECT node_name=bobbin-tpu accelerator_type=TPUTYPE ssh_user=SSHUSER"
 ```
 
 "PROJECT", "ZONE", and "TPUTYPE" here are placeholders, and values must be
@@ -81,7 +81,8 @@ Finally, we can run the following command for running training.
 ```
 gcloud compute tpus tpu-vm ssh bobbin-tpu \
     --zone=ZONE --project=PROJECT --worker=all --command \
-    'python3 bobbin/examples/librispeech/train.py \
+    'source bobbin_env/bin/activate; \
+     python bobbin/examples/librispeech/train.py \
         --tfds_data_dir gs://DATASET_BUCKET/tensorflow_datasets \
         --log_dir_path gs://JOB_LOG_BUCKET/librispeech/first_exp \
         --per_device_batch_size=16'

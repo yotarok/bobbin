@@ -12,6 +12,7 @@
     node_name: CONFIG_NOT_PROVIDED
     accelerator_type: v3-8
     vm_version: tpu-vm-base
+    ssh_user: CONFIG_NOT_PROVIDED
   tasks:
     - name: Enabling TPU API
       ansible.builtin.command:
@@ -32,7 +33,7 @@
           else
             echo "ALREADY_CREATED"
           fi
-          SSH_CMD=$(gcloud --quiet compute tpus tpu-vm ssh {{ vars.node_name }} --zone {{ vars.zone }} --project {{ vars.project }} --dry-run)
+          SSH_CMD=$(gcloud --quiet compute tpus tpu-vm ssh {{ vars.ssh_user }}@{{ vars.node_name }} --zone {{ vars.zone }} --project {{ vars.project }} --dry-run)
           SSH_OPTS=$(echo "${SSH_CMD}" | sed 's/^[^ ]* //' | sed 's/ [^ ]*$//' | sed 's/-t //')
           TARGET=$(echo "${SSH_CMD}" | sed 's/^.* \([^ ]*\)$/\1/')
           USER=$(echo "${TARGET}" | cut -d'@' -f 1)
@@ -75,6 +76,7 @@
     ansible_ssh_common_args: "{{ hostvars.localhost.tpu_ssh_common_args }}"
     ansible_ssh_user: "{{ hostvars.localhost.tpu_ssh_user }}"
     bobbin_root: "{{ ansible_facts.env.PWD }}/bobbin"
+    bobbin_env_root: "{{ ansible_facts.env.PWD }}/bobbin_env"
     gcloud_credential_file: "{{ lookup('env', 'HOME') }}/.config/gcloud/application_default_credentials.json"
   tasks:
     - name: Creating credential directory
@@ -87,11 +89,18 @@
         src: "{{ gcloud_credential_file }}"
         dest: "{{ ansible_facts.env.HOME }}/.config/gcloud/application_default_credentials.json"
         mode: '0600'
+    - name: Installing tensorflow_io
+      # This module is installed first since tensorflow_io is especially
+      # sensitive to the version of tensorflow installed.
+      ansible.builtin.pip:
+        name:
+          - "tensorflow-io[tensorflow]"
+        virtualenv: "{{ bobbin_env_root }}"
     - name: Installing jax
       ansible.builtin.pip:
         name: "jax[tpu]"
         extra_args: "--find-links=https://storage.googleapis.com/jax-releases/libtpu_releases.html"
-      become: true
+        virtualenv: "{{ bobbin_env_root }}"
     - name: Synchronizing bobbin dir
       ansible.posix.synchronize:
         src: "{{ playbook_dir }}/../.."
@@ -108,17 +117,17 @@
     - name: Installing bobbin prerequiments
       ansible.builtin.pip:
         requirements: "{{ bobbin_root }}/requirements/requirements.txt"
-      become: true
+        virtualenv: "{{ bobbin_env_root }}"
     - name: Installing bobbin
       ansible.builtin.pip:
         chdir: "{{ bobbin_root }}"
         name: "."
         state: "forcereinstall"
+        virtualenv: "{{ bobbin_env_root }}"
     - name: Installing utilities for example trainers
       ansible.builtin.pip:
         name:
           - "tensorboard"
-          - "tensorflow-io"
           - "tensorflow_datasets"
           - "fiddle"
-      become: true
+        virtualenv: "{{ bobbin_env_root }}"
