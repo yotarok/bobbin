@@ -122,6 +122,11 @@
       ansible.builtin.pip:
         chdir: "{{ bobbin_root }}"
         name: "."
+        # This task reinstalls bobbin with the latest source, but does not
+        # upgrade its dependencies.  "--no-deps" is required for not to
+        # overwrite specific version of "tensorflow" and "tensorflow_io"
+        # installed in the previous step.
+        extra_args: "--no-deps"
         state: "forcereinstall"
         virtualenv: "{{ bobbin_env_root }}"
     - name: Installing utilities for example trainers
