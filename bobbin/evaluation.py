@@ -163,6 +163,7 @@ class RunEval:
             orbax.checkpoint.AbstractCheckpointer, orbax.checkpoint.CheckpointersDict
         ],
         options: Optional[orbax.checkpoint.CheckpointManagerOptions] = None,
+        disable_distributed_mode: bool = True,
         *checkpoint_manager_args,
         **checkpoint_manager_kwargs,
     ) -> RunEvalKeepBest:
@@ -173,7 +174,12 @@ class RunEval:
             *checkpoint_manager_args,
             **checkpoint_manager_kwargs,
         )
-        return RunEvalKeepBest(self, tune_on, checkpoint_manager)
+        return RunEvalKeepBest(
+            self,
+            tune_on,
+            checkpoint_manager,
+            disable_distributed_mode=disable_distributed_mode,
+        )
 
     def add_result_processor(self, f: EvalResultProcessorFn):
         self._result_processors.append(f)
@@ -206,12 +212,14 @@ class RunEvalKeepBest:
         run_eval_action: Action,
         tune_on: str,
         checkpoint_manager: orbax.checkpoint.CheckpointManager,
+        disable_distributed_mode: bool = True,
     ):
         self._run_eval_action = run_eval_action
         self._tune_on = tune_on
         self._current_best = None
         self._ckpt_manager = checkpoint_manager
         self._results_path = checkpoint_manager.directory / "results.json"
+        self._disable_distributed_mode = disable_distributed_mode
 
     def __call__(self, train_state, **kwargs):
         eval_results = self._run_eval_action(train_state, **kwargs)
@@ -227,6 +235,8 @@ class RunEvalKeepBest:
         if self._current_best is None or result.is_better_than(self._current_best):
             self._current_best = result
 
+            if self._disable_distributed_mode:
+                train_state = jax.tree_util.tree_map(np.asarray, train_state)
             self._ckpt_manager.save(train_state.step, train_state)
             if jax.process_index() == 0:
                 write_pytree_json_file(self._results_path, result)
