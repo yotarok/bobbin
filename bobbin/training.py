@@ -309,8 +309,20 @@ class BaseTrainTask:
         self,
         writer: flax_tb.SummaryWriter,
         summary_collections: Iterable[str] = ("tensorboard",),
-    ):
+    ) -> PublishTrainingProgress:
         return PublishTrainingProgress(writer, summary_collections)
+
+    def make_checkpointing_action(
+        self,
+        checkpoint_manager: orbax.checkpoint.CheckpointManager,
+        disable_distributed_mode: bool = True,
+    ) -> Action:
+        def invoke_checkpointer(train_state, *args, **kwargs):
+            if disable_distributed_mode:
+                train_state = jax.tree_util.tree_map(np.asarray, train_state)
+            checkpoint_manager.save(train_state.step, train_state)
+
+        return invoke_checkpointer
 
 
 class TrainTask(BaseTrainTask):

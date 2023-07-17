@@ -968,8 +968,8 @@ def main(args: argparse.Namespace):
         orbax.checkpoint.CheckpointManagerOptions(max_to_keep=10),
     )
 
-    crontab.checkpoint(
-        all_saver,
+    crontab.schedule(
+        task.make_checkpointing_action(all_saver),
         step_interval=1000,
         at_step=warmup,
     )

@@ -143,19 +143,6 @@ class CronTab:
     def __init__(self):
         self._actions = []
 
-    def checkpoint(
-        self,
-        checkpoint_manager: orbax.checkpoint.CheckpointManager,
-        disable_distributed_mode: bool = True,
-        **kwargs,
-    ) -> CronTab:
-        def invoke_checkpointer(train_state, *args, **kwargs):
-            if disable_distributed_mode:
-                train_state = jax.tree_util.tree_map(np.asarray, train_state)
-            checkpoint_manager.save(train_state.step, train_state)
-
-        return self.schedule(invoke_checkpointer, **kwargs)
-
     def schedule(
         self,
         action: Action,
