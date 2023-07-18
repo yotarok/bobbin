@@ -312,18 +312,6 @@ class BaseTrainTask:
     ) -> PublishTrainingProgress:
         return PublishTrainingProgress(writer, summary_collections)
 
-    def make_checkpointing_action(
-        self,
-        checkpoint_manager: orbax.checkpoint.CheckpointManager,
-        disable_distributed_mode: bool = True,
-    ) -> Action:
-        def invoke_checkpointer(train_state, *args, **kwargs):
-            if disable_distributed_mode:
-                train_state = jax.tree_util.tree_map(np.asarray, train_state)
-            checkpoint_manager.save(train_state.step, train_state)
-
-        return invoke_checkpointer
-
 
 class TrainTask(BaseTrainTask):
     """Task definition for training of parameters of `nn.Module`."""
@@ -436,3 +424,29 @@ def initialize_train_state(
             new_state = cpman.restore(latest, items=new_state)
 
     return new_state
+
+
+def make_checkpointing_action(
+    checkpoint_manager: orbax.checkpoint.CheckpointManager,
+    experimental_use_distributed_mode: bool = False,
+) -> Action:
+    """Makes checkpointing action for invoking orbax checkpoint manager.
+
+    Args:
+        checkpoint_manager: Checkpoint manager
+        experimental_use_distributed_mode: If False (by default), the array
+            is gathered to a leader host and stored as numpy array, i.e. no
+            multihost checkpointing will be used.
+    """
+
+    def invoke_checkpointer(train_state, *args, **kwargs):
+        if not isinstance(train_state, flax.training.train_state.TrainState):
+            raise TypeError(
+                "Checkpointer is called with an argument that is not a TrainState"
+            )
+
+        if not experimental_use_distributed_mode:
+            train_state = jax.tree_util.tree_map(np.asarray, train_state)
+        checkpoint_manager.save(train_state.step, train_state)
+
+    return invoke_checkpointer

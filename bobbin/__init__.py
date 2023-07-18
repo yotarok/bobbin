@@ -49,6 +49,7 @@ from .tensorboard import ThreadedSummaryWriter
 
 from .training import BaseTrainTask
 from .training import initialize_train_state
+from .training import make_checkpointing_action
 from .training import TrainTask
 from .training import TrainState
 

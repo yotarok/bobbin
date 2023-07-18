@@ -32,9 +32,6 @@ from typing import (
 
 import flax
 import flax.training.train_state
-import jax
-import numpy as np
-import orbax.checkpoint
 
 TrainState = flax.training.train_state.TrainState
 Action = Callable[..., Optional[Tuple[TrainState, ...]]]
